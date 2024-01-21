@@ -5,7 +5,7 @@ services:
     build:
       context: ./Server
     environment:
-      - SERVER_ID=1  # Set the desired SERVER_ID as an example
+      - HOSTNAME=server  # Set the desired HOSTNAME as an example
     container_name: server
     networks:
       - net1
