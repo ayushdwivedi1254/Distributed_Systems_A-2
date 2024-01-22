@@ -4,9 +4,30 @@ services:
   server:
     build:
       context: ./Server
+    image: distributed_systems_a-1-server:latest
     environment:
-      - HOSTNAME=server  # Set the desired HOSTNAME as an example
-    container_name: server
+      - HOSTNAME=Server1  # Set the desired HOSTNAME as an example
+    container_name: Server1
+    networks:
+      - net1
+    
+  server2:
+    image: distributed_systems_a-1-server:latest
+    environment:
+      - HOSTNAME=Server2  # Set the desired HOSTNAME as an example
+    container_name: Server2
+    depends_on:
+      - server
+    networks:
+      - net1
+
+  server3:
+    image: distributed_systems_a-1-server:latest
+    environment:
+      - HOSTNAME=Server3  # Set the desired HOSTNAME as an example
+    container_name: Server3
+    depends_on:
+      - server
     networks:
       - net1
 
@@ -19,6 +40,11 @@ services:
       - net1
     depends_on:
       - server
+      - server2
+      - server3
+    environment:
+      - SERVER_NAMES=Server1,Server2,Server3
+      - COUNT=3
     privileged: true
     container_name: load_balancer
     volumes:

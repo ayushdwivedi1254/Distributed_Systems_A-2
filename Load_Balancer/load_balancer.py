@@ -5,8 +5,11 @@ import requests,os,random
 app = Flask(__name__)
 
 backend_server = "http://server:5000"
-count=0
-server_names=[]
+count=int(os.environ.get('COUNT', ''))
+server_names = os.environ.get('SERVER_NAMES', '')
+
+# Split the string into a list using the delimiter
+server_names = server_names.split(',')
 
 @app.route('/home', methods=['GET'])
 def proxy_request():
@@ -117,9 +120,10 @@ def remove_server():
         else:
             hostname=random.choice(server_names)
 
-        res=os.system(f'sudo docker stop {hostname} && sudo docker rm {hostname}')
+        res1=os.system(f'sudo docker stop {hostname}')
+        res2=os.system(f'sudo docker rm {hostname}')
         
-        if res!=0:
+        if res1!=0 or res2!=0:
             response_json={
                 "message": f"<Error> Failed to remove server {hostname}",
                 "status": "failure"
