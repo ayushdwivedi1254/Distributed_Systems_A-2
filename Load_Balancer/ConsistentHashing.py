@@ -11,12 +11,18 @@ class OrderedSet:
     def delete(self, value):
         self.ordered_set.discard(value)
 
+    def get(self, index):
+        if 0 <= index < len(self.ordered_set):
+            return self.ordered_set[index]
+        else:
+            raise IndexError(f"Index {index} out of range.")
+
     def upper_bound(self, value):
         upper_bound_index = self.ordered_set.bisect_right(value)
         if upper_bound_index < len(self.ordered_set):
-            return self.ordered_set[upper_bound_index]
+            return self.ordered_set.get(upper_bound_index)
         else:
-            return self.ordered_set[0]
+            return self.ordered_set.get(0)
 
 
 class ConsistentHashing:
@@ -69,9 +75,11 @@ class ConsistentHashing:
             self.serverIndices.delete(ind)
         self.serverNameToIndex.pop(server_name)
 
-    def allocate(self):
-        # TODO
-        pass
+    def allocate(self, request_json: dict):
+        reqID = request_json["id"]
+        reqIndex = self.calcRequestHash(reqID)
+        serverIndex = self.serverIndices.upper_bound(reqIndex)
+        return self.serverList[serverIndex]
 
     def debug_print(self):
         print("All Server Indices:", self.serverIndices)
