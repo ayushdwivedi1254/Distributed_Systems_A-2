@@ -1,33 +1,33 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  server:
+  server1:
     build:
       context: ./Server
     image: distributed_systems_a-1-server:latest
     environment:
-      - HOSTNAME=Server1  # Set the desired HOSTNAME as an example
+      - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
     container_name: Server1
     networks:
       - net1
-    
+
   server2:
     image: distributed_systems_a-1-server:latest
     environment:
-      - HOSTNAME=Server2  # Set the desired HOSTNAME as an example
+      - HOSTNAME=Server2 # Set the desired HOSTNAME as an example
     container_name: Server2
     depends_on:
-      - server
+      - server1
     networks:
       - net1
 
   server3:
     image: distributed_systems_a-1-server:latest
     environment:
-      - HOSTNAME=Server3  # Set the desired HOSTNAME as an example
+      - HOSTNAME=Server3 # Set the desired HOSTNAME as an example
     container_name: Server3
     depends_on:
-      - server
+      - server1
     networks:
       - net1
 
@@ -39,7 +39,7 @@ services:
     networks:
       - net1
     depends_on:
-      - server
+      - server1
       - server2
       - server3
     environment:
@@ -49,7 +49,6 @@ services:
     container_name: load_balancer
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
 
 networks:
   net1:

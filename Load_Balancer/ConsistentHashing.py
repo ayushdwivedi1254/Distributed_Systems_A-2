@@ -63,6 +63,8 @@ class ConsistentHashing:
         pass
 
     def remove_server(self, server_number: int, server_name: str):
+        if self.serverNameToIndex.get(server_name) is None:
+            return
         for ind in self.serverNameToIndex[server_name]:
             self.serverList[ind] = ''
             self.serverIndices.delete(ind)

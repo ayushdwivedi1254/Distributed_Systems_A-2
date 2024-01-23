@@ -165,7 +165,7 @@ from ConsistentHashing import ConsistentHashing
 
 app = Flask(__name__)
 
-backend_server = "http://server:5000"
+# backend_server = "http://server1:5000"
 N = int(os.environ.get('COUNT', ''))
 server_names = os.environ.get('SERVER_NAMES', '')
 count = N
@@ -189,11 +189,21 @@ for i in range(0, len(server_names)):
     server_name_to_number[server_names[i]] = i+1
 
 lock = threading.Lock()
+server_name_lock = threading.Lock()
+
 seed_value = int(time.time())
 random.seed(seed_value)
 
 
 def worker(thread_number):
+    global count
+    global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global consistent_hashing
+
     while True:
         # Get a request from the queue
         request_data = request_queue.get()
@@ -202,7 +212,7 @@ def worker(thread_number):
         with lock:
             serverName = consistent_hashing.allocate(reqID)
 
-        print(f"Thread {thread_number} processing request")
+        # print(f"Thread {thread_number} processing request")
 
         # Send the request to the backend server
         response = requests.request(
@@ -227,14 +237,67 @@ def worker(thread_number):
         request_queue.task_done()
 
 
+def heartbeat():
+    global count
+    global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global consistent_hashing
+
+    while True:
+        time.sleep(10)
+
+        with server_name_lock:
+            current_server_names = server_names.copy()
+
+        for server_name in current_server_names:
+            try:
+                response = requests.get(
+                    f"http://{server_name}:5000/heartbeat")
+                response.raise_for_status()
+            except requests.RequestException:
+
+                with server_name_lock:
+                    if server_name in server_names:
+                        server_names.remove(server_name)
+                        count -= 1
+
+                with lock:
+                    consistent_hashing.remove_server(
+                        server_name_to_number[server_name], server_name)
+
+        with server_name_lock:
+            current_server_names = server_names.copy()
+        if len(current_server_names) < N:
+            servers_to_add = N-len(current_server_names)
+            payload = {
+                'n': servers_to_add,
+                'hostnames': []
+            }
+            response = requests.post(
+                "http://load_balancer:5000/add", json=payload)
+
+
 # Create worker threads
 num_workers = 100
 for _ in range(num_workers):
     threading.Thread(target=worker, args=(_,), daemon=True).start()
 
+threading.Thread(target=heartbeat, daemon=True).start()
+
 
 @app.route('/home', methods=['GET'])
 def proxy_request():
+    global count
+    global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global consistent_hashing
+
     # Create a queue for each request to handle its response
     response_queue = queue.Queue()
 
@@ -270,18 +333,24 @@ def add_server():
 
     global count
     global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global consistent_hashing
 
     payload = request.json
     n = payload.get('n')
     hostnames = payload.get('hostnames')
 
     for hostname in hostnames:
-        if hostname in server_names:
-            response_json = {
-                "message": f"<Error> Server name {hostname} already exists",
-                "status": "failure"
-            }
-            return jsonify(response_json), 400
+        with server_name_lock:
+            if hostname in server_names:
+                response_json = {
+                    "message": f"<Error> Server name {hostname} already exists",
+                    "status": "failure"
+                }
+                return jsonify(response_json), 400
 
     if n < len(hostnames):
         response_json = {
@@ -293,7 +362,7 @@ def add_server():
     for i in range(0, n):
         res = None
         hostname = None
-
+        flag = 0
         if (i < len(hostnames)):
             hostname = hostnames[i]
             res = os.popen(
@@ -302,6 +371,7 @@ def add_server():
             res = os.popen(
                 f'sudo docker run --network distributed_systems_a-1_net1 -d distributed_systems_a-1-server').read()
             hostname = res
+            flag = 1
 
         if len(res) == 0:
             response_json = {
@@ -310,17 +380,25 @@ def add_server():
             }
             return jsonify(response_json), 400
         else:
-            count += 1
-            server_names.append(hostname)
-            server_counter = server_counter+1
+            if flag:
+                hostname = hostname[:12]
+            with server_name_lock:
+                count += 1
+                server_names.append(hostname)
+
+            server_counter += 1
             server_name_to_number[hostname] = server_counter
             with lock:
                 consistent_hashing.add_server(server_counter, hostname)
 
+    with server_name_lock:
+        count_copy = count
+        server_names_copy = server_names.copy()
+
     response_json = {
         "message": {
-            "N": count,
-            "replicas": server_names
+            "N": count_copy,
+            "replicas": server_names_copy
         },
         "status": "successful"
     }
@@ -331,6 +409,11 @@ def add_server():
 def remove_server():
     global count
     global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global consistent_hashing
 
     payload = request.json
     n = payload.get('n')
@@ -375,18 +458,23 @@ def remove_server():
                 "status": "failure"
             }
             return jsonify(response_json), 400
-
-        server_names.remove(hostname)
-        count -= 1
+        with server_name_lock:
+            if hostname in server_names:
+                server_names.remove(hostname)
+                count -= 1
         with lock:
             consistent_hashing.remove_server(
                 server_name_to_number[hostname], hostname)
         server_name_to_number.pop(hostname)
 
+    with server_name_lock:
+        count_copy = count
+        server_names_copy = server_names.copy()
+
     response_json = {
         "message": {
-            "N": count,
-            "replicas": server_names
+            "N": count_copy,
+            "replicas": server_names_copy
         },
         "status": "successful"
     }
