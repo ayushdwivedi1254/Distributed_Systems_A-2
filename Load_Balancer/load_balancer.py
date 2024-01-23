@@ -344,5 +344,13 @@ def remove_server():
     }   
     return jsonify(response_json),200
 
+@app.route('/<path:path>', methods=['GET'])
+def endpoint_nonexistent(path):
+    response_json = {
+        "message": f"<Error> '/{path}' endpoint does not exist in server replicas",
+        "status": "failure"
+    }   
+    return jsonify(response_json),400
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
