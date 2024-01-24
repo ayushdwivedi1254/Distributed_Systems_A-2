@@ -6,6 +6,7 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install --trusted-host pypi.python.org flask requests
+RUN pip install sortedcontainers
 
 RUN apt-get update
 RUN apt-get -y install sudo

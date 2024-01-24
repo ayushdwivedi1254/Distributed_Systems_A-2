@@ -11,18 +11,12 @@ class OrderedSet:
     def delete(self, value):
         self.ordered_set.discard(value)
 
-    def get(self, index):
-        if 0 <= index < len(self.ordered_set):
-            return self.ordered_set[index]
-        else:
-            raise IndexError(f"Index {index} out of range.")
-
     def upper_bound(self, value):
         upper_bound_index = self.ordered_set.bisect_right(value)
         if upper_bound_index < len(self.ordered_set):
-            return self.ordered_set.get(upper_bound_index)
+            return self.ordered_set[upper_bound_index]
         else:
-            return self.ordered_set.get(0)
+            return self.ordered_set[0]
 
 
 class ConsistentHashing:
@@ -45,7 +39,7 @@ class ConsistentHashing:
         replicas = []
 
         for j in range(self.K):
-            hash = self.calcServerHash(server_number, j)
+            hash = self.calcServerHash(server_number, j+1)
             index = hash
             count = 1
             # quadratic probing
@@ -63,32 +57,20 @@ class ConsistentHashing:
         hash = id*id+2*id+17
         return hash % self.M
 
-    def add_request(self, request_json: dict):
-        reqID = request_json["id"]
+    def add_request(self, reqID: int):
         reqIndex = self.calcRequestHash(reqID)
         self.requestList[reqIndex].append(reqID)
         pass
 
     def remove_server(self, server_number: int, server_name: str):
+        if self.serverNameToIndex.get(server_name) is None:
+            return
         for ind in self.serverNameToIndex[server_name]:
             self.serverList[ind] = ''
             self.serverIndices.delete(ind)
         self.serverNameToIndex.pop(server_name)
 
-    def allocate(self, request_json: dict):
-        reqID = request_json["id"]
+    def allocate(self, reqID: int):
         reqIndex = self.calcRequestHash(reqID)
         serverIndex = self.serverIndices.upper_bound(reqIndex)
         return self.serverList[serverIndex]
-
-    def debug_print(self):
-        print("All Server Indices:", self.serverIndices)
-        print("Server Name to Instances Indices:", self.serverNameToIndex)
-        print("Consistent Hashing serverList:", self.serverList)
-
-
-# # Example usage:
-# consistent_hashing = ConsistentHashing(N=3, M=512, K=9)
-# consistent_hashing.add_server(1, "Server1")
-# consistent_hashing.add_server(2, "Server2")
-# consistent_hashing.add_server(3, "Server3")
