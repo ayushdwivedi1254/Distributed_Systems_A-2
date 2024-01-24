@@ -209,20 +209,24 @@ def worker(thread_number):
         request_data = request_queue.get()
 
         reqID = request_data["id"]
-        with lock:
-            serverName = consistent_hashing.allocate(reqID)
+        
+        while True:
+            with lock:
+                serverName = consistent_hashing.allocate(reqID)
 
-        # print(f"Thread {thread_number} processing request")
-
-        # Send the request to the backend server
-        response = requests.request(
-            method=request_data['method'],
-            url=f"http://{serverName}:5000{request_data['path']}",
-            headers=request_data['headers'],
-            data=request_data['data'],
-            cookies=request_data['cookies'],
-            allow_redirects=False
-        )
+            try:
+                # Send the request to the backend server
+                response = requests.request(
+                    method=request_data['method'],
+                    url=f"http://{serverName}:5000{request_data['path']}",
+                    headers=request_data['headers'],
+                    data=request_data['data'],
+                    cookies=request_data['cookies'],
+                    allow_redirects=False
+                )
+                break
+            except requests.RequestException as e:
+                pass
 
         # Send the response back to the client
         request_data['response_queue'].put({
