@@ -28,7 +28,6 @@ class ConsistentHashing:
         # Initialize data structures
         self.serverIndices = OrderedSet()
         self.serverNameToIndex: dict[str, list[int]] = {}
-        self.requestList = [[] for _ in range(M)]
         self.serverList = ['' for _ in range(M)]
 
     def calcServerHash(self, i: int, j: int):
@@ -56,11 +55,6 @@ class ConsistentHashing:
     def calcRequestHash(self, id: int):
         hash = id*id+2*id+17
         return hash % self.M
-
-    def add_request(self, reqID: int):
-        reqIndex = self.calcRequestHash(reqID)
-        self.requestList[reqIndex].append(reqID)
-        pass
 
     def remove_server(self, server_number: int, server_name: str):
         if self.serverNameToIndex.get(server_name) is None:

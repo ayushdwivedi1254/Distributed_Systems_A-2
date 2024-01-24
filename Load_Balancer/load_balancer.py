@@ -153,9 +153,6 @@ def proxy_request(path):
     # Generate random 6 digit id
     id = random.randint(100000, 999999)
 
-    with lock:
-        consistent_hashing.add_request(id)
-
     # Put the request details into the shared queue
     request_queue.put({
         'method': request.method,
