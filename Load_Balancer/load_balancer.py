@@ -247,7 +247,7 @@ def heartbeat():
     global consistent_hashing
 
     while True:
-        time.sleep(10)
+        time.sleep(0.5)
 
         with server_name_lock:
             current_server_names = server_names.copy()
@@ -382,6 +382,13 @@ def add_server():
         else:
             if flag:
                 hostname = hostname[:12]
+            while True:
+                inspect_command = f'curl --fail --silent --output /dev/null --write-out "%{{http_code}}" http://{hostname}:5000/heartbeat'
+                container_status = os.popen(inspect_command).read().strip()
+                if container_status == '200':
+                    break
+                else:
+                    time.sleep(0.1)
             with server_name_lock:
                 count += 1
                 server_names.append(hostname)
@@ -465,7 +472,7 @@ def remove_server():
         with lock:
             consistent_hashing.remove_server(
                 server_name_to_number[hostname], hostname)
-        server_name_to_number.pop(hostname)
+        # server_name_to_number.pop(hostname)
 
     with server_name_lock:
         count_copy = count
