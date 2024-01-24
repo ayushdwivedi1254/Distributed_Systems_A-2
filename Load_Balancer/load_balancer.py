@@ -327,6 +327,28 @@ def proxy_request():
         'thread_number': response_data['thread_number']
     }), response_data['status_code']
 
+@app.route('/rep', methods=['GET'])
+def get_replicas():
+    global count
+    global server_names
+    global server_name_lock
+
+    current_count=0
+    current_server_names=[]
+
+    with server_name_lock:
+        current_server_names=server_names.copy()
+        current_count=count 
+
+    response_json={
+        "message":{
+            "N": current_count,
+            "replicas": current_server_names
+        },
+        "status": "successful"
+    },
+    return jsonify(response_json),200
+
 
 @app.route('/add', methods=['POST'])
 def add_server():
@@ -366,10 +388,10 @@ def add_server():
         if (i < len(hostnames)):
             hostname = hostnames[i]
             res = os.popen(
-                f'sudo docker run --name "{hostname}" --network distributed_systems_a-1_net1 --network-alias "{hostname}" -e HOSTNAME="{hostname}" -d distributed_systems_a-1-server').read()
+                f'sudo docker run --name "{hostname}" --network distributed_systems_a-1_net1 --network-alias "{hostname}" -e HOSTNAME="{hostname}" -e SERVER_ID="{server_counter}" -d distributed_systems_a-1-server').read()
         else:
             res = os.popen(
-                f'sudo docker run --network distributed_systems_a-1_net1 -d distributed_systems_a-1-server').read()
+                f'sudo docker run --network distributed_systems_a-1_net1 -e SERVER_ID="{server_counter}" -d distributed_systems_a-1-server').read()
             hostname = res
             flag = 1
 

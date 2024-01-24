@@ -14,7 +14,7 @@ RUN pip install --trusted-host pypi.python.org flask
 # EXPOSE 5000
 
 # Define environment variable
-ENV SERVER_ID Unknown
+# ENV SERVER_ID Unknown
 
 # Run app.py when the container launches
 CMD ["python", "server.py"]

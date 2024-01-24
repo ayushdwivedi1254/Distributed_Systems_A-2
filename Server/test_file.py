@@ -4,8 +4,9 @@ import aiohttp
 
 async def make_request(session, url):
     async with session.get(url) as response:
-        return await response.text()
-
+        res= await response.text()
+        print(res)
+        return res
 
 async def generate_requests():
     # Replace with the actual address of your load balancer
@@ -20,6 +21,6 @@ async def generate_requests():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     result = loop.run_until_complete(generate_requests())
-    for response in result:
-        print(response)
+    # for response in result:
+        # print(response)
     # print(result)  # Print the first 5 responses for verification

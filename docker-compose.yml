@@ -7,6 +7,7 @@ services:
     image: distributed_systems_a-1-server:latest
     environment:
       - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+      - SERVER_ID=1
     container_name: Server1
     networks:
       - net1
@@ -15,6 +16,7 @@ services:
     image: distributed_systems_a-1-server:latest
     environment:
       - HOSTNAME=Server2 # Set the desired HOSTNAME as an example
+      - SERVER_ID=2
     container_name: Server2
     depends_on:
       - server1
@@ -25,6 +27,7 @@ services:
     image: distributed_systems_a-1-server:latest
     environment:
       - HOSTNAME=Server3 # Set the desired HOSTNAME as an example
+      - SERVER_ID=3
     container_name: Server3
     depends_on:
       - server1

@@ -5,11 +5,12 @@ app = Flask(__name__)
 
 @app.route('/home', methods=['GET'])
 def home():
-    container_name = os.environ.get('HOSTNAME')
-    if container_name is None:
-        with open('/etc/hostname', 'r') as file:
-            container_name = file.read().strip()
-    return f'Hello from Server: {container_name}'
+    # container_name = os.environ.get('HOSTNAME')
+    server_id=os.environ.get('SERVER_ID')
+    # if container_name is None:
+    #     with open('/etc/hostname', 'r') as file:
+    #         container_name = file.read().strip()
+    return f'Hello from Server: {server_id}'
 
 @app.route('/heartbeat', methods=['GET'])
 def heartbeat():
