@@ -98,7 +98,7 @@ We observe that the average load for each server decreases as the number of serv
 
 ### A-3
 
-We have tested all the endpoints of the load balancer including the `/add` and `/remove` endpoints. The heartbeat thread of the load balancer keeps monitoring the server containers and whenever their number falls below N, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load.
+We have tested all the endpoints of the load balancer including the `/add` and `/rm` endpoints. The heartbeat thread of the load balancer keeps monitoring the server containers and whenever their number falls below N, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load.
 
 ### A-4  
 
