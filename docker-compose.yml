@@ -4,7 +4,7 @@ services:
   server1:
     build:
       context: ./Server
-    image: distributed_systems_a-1-server:latest
+    image: distributed_systems_a-2-server:latest
     environment:
       - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
       - SERVER_ID=1
@@ -13,7 +13,7 @@ services:
       - net1
 
   server2:
-    image: distributed_systems_a-1-server:latest
+    image: distributed_systems_a-2-server:latest
     environment:
       - HOSTNAME=Server2 # Set the desired HOSTNAME as an example
       - SERVER_ID=2
@@ -24,7 +24,7 @@ services:
       - net1
 
   server3:
-    image: distributed_systems_a-1-server:latest
+    image: distributed_systems_a-2-server:latest
     environment:
       - HOSTNAME=Server3 # Set the desired HOSTNAME as an example
       - SERVER_ID=3

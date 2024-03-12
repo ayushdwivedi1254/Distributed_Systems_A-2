@@ -236,10 +236,10 @@ def add_server():
         if (i < len(hostnames)):
             hostname = hostnames[i]
             res = os.popen(
-                f'sudo docker run --name "{hostname}" --network distributed_systems_a-1_net1 --network-alias "{hostname}" -e HOSTNAME="{hostname}" -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-1-server').read()
+                f'sudo docker run --name "{hostname}" --network distributed_systems_a-2_net1 --network-alias "{hostname}" -e HOSTNAME="{hostname}" -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-2-server').read()
         else:
             res = os.popen(
-                f'sudo docker run --network distributed_systems_a-1_net1 -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-1-server').read()
+                f'sudo docker run --network distributed_systems_a-2_net1 -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-2-server').read()
             hostname = res
             flag = 1
 
