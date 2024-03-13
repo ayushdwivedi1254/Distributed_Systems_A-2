@@ -81,13 +81,13 @@ def config():
     }
     return jsonify(response_json), 200
 
-@app.route('/home', methods=['GET'])
-def home():
-    container_name = os.environ.get('HOSTNAME')
-    if container_name is None:
-        with open('/etc/hostname', 'r') as file:
-            container_name = file.read().strip()
-    return f'Hello from Server: {container_name}'
+# @app.route('/home', methods=['GET'])
+# def home():
+#     container_name = os.environ.get('HOSTNAME')
+#     if container_name is None:
+#         with open('/etc/hostname', 'r') as file:
+#             container_name = file.read().strip()
+#     return f'Hello from Server: {container_name}'
 
 @app.route('/heartbeat', methods=['GET'])
 def heartbeat():
@@ -107,7 +107,14 @@ def copy():
         cursor.execute(f"SELECT * FROM {shard};")
         data = cursor.fetchall()
         cursor.close()
-        response_data[shard] = [dict(row) for row in data]
+        # response_data[shard] = [row for row in data]
+        response_data[shard]=[]
+        column_names = [column[0] for column in cursor.description]
+    
+        # Create dictionaries with column names as keys
+        for row in data:
+            row_dict = dict(zip(column_names, row))
+            response_data[shard].append(row_dict)
 
     response_json = {
         "status": "success",
@@ -127,13 +134,20 @@ def read():
     low=stud_id['low']
     high=stud_id['high']
 
-    response_data = {}
+    response_data = []
 
     cursor = db_connection.cursor()
     cursor.execute(f"SELECT * FROM {shard} WHERE Stud_id BETWEEN {low} AND {high};")
     data = cursor.fetchall()
     cursor.close()
-    response_data = [dict(row) for row in data]
+
+    column_names = [column[0] for column in cursor.description]
+    
+    # Create dictionaries with column names as keys
+    for row in data:
+        row_dict = dict(zip(column_names, row))
+        response_data.append(row_dict)
+    # response_data = [row for row in data]
 
     response_json = {
         "data": response_data,
@@ -167,6 +181,59 @@ def write():
     response_json = {
         "message": "Data entries added",
         "current_idx": curr_idx,
+        "status": "success"
+    }
+
+    return jsonify(response_json), 200
+
+@app.route('/update', methods=['PUT'])
+def update():
+    if db_connection is None:
+        connect_to_database()
+
+    request_payload = request.json
+    shard = request_payload.get('shard')
+    stud_id = request_payload.get('Stud_id')
+    data=request_payload.get('data',{})
+
+    columns=data.keys()
+    values=list(data.values())
+
+    cursor = db_connection.cursor()
+    
+    set_clause=', '.join([f"{column}=%s" for column in columns])
+    update_query=f'UPDATE {shard} SET {set_clause} WHERE stud_id={stud_id};'
+    cursor.execute(update_query,values)
+    db_connection.commit()
+    
+    cursor.close()
+
+    response_json = {
+        "message": f"Data entry for Stud_id:{stud_id} updated",
+        "status": "success"
+    }
+
+    return jsonify(response_json), 200
+
+@app.route('/del', methods=['DELETE'])
+def delete():
+    if db_connection is None:
+        connect_to_database()
+
+    request_payload = request.json
+    shard = request_payload.get('shard')
+    stud_id = request_payload.get('Stud_id')
+
+    cursor = db_connection.cursor()
+    
+    delete_query=f'DELETE FROM {shard} WHERE stud_id={stud_id};'
+    cursor.execute(delete_query)
+    db_connection.commit()
+    
+    cursor.close()
+
+    response_json = {
+        "message": f"Data entry with Stud_id:{stud_id} removed",
         "status": "success"
     }
 
