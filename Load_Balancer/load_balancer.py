@@ -950,7 +950,7 @@ def update():
 
 
 
-@app.route('/delete', methods=['DELETE'])
+@app.route('/del', methods=['DELETE'])
 def delete():
     global ShardT
     global shard_id_to_delete_request_queue

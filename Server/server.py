@@ -28,12 +28,16 @@ def connect_to_database():
     #     password="abc",
     #     database="distributed_database"
     # )
-    db_connection = psycopg2.connect(
-        host="localhost",
-        user="postgres",
-        password="abc",
-        # database="distributed_database"
-    )
+    try:
+        db_connection = psycopg2.connect(
+            host="localhost",
+            user="postgres",
+            password="abc",
+            # database="distributed_database"
+        )
+    except Exception as e:
+        print(f"Error connecting to database:{str(e)}",500)
+        return
 
     db_connection.autocommit = True
     create_database_query="CREATE DATABASE distributed_database;"
@@ -52,7 +56,7 @@ def connect_to_database():
 
 @app.route('/config', methods=['POST'])
 def config():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
@@ -95,7 +99,7 @@ def heartbeat():
 
 @app.route('/copy', methods=['GET'])
 def copy():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
@@ -125,7 +129,7 @@ def copy():
 
 @app.route('/read', methods=['POST'])
 def read():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
@@ -158,7 +162,7 @@ def read():
 
 @app.route('/write', methods=['POST'])
 def write():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
@@ -188,7 +192,7 @@ def write():
 
 @app.route('/update', methods=['PUT'])
 def update():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
@@ -217,7 +221,7 @@ def update():
 
 @app.route('/del', methods=['DELETE'])
 def delete():
-    if db_connection is None:
+    while db_connection is None:
         connect_to_database()
 
     request_payload = request.json
