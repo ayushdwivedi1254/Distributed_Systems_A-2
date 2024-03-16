@@ -22,8 +22,8 @@ count = N
 # server_names = server_names.split(',')
 server_names = []
 
-# Shared queue for incoming requests
-request_queue = queue.Queue()
+# Shared queue for incoming read requests
+read_request_queue = queue.Queue()
 
 # server number counter and map
 server_counter = N
@@ -41,11 +41,18 @@ shards = {}
 server_name_to_shards = {}
 shard_id_to_consistent_hashing = {}
 shard_id_to_consistent_hashing_lock = {}
+shard_id_to_write_request_lock = {}
+shard_id_to_write_request_queue = {}
+shard_id_to_write_thread = {}
+shard_id_to_update_request_queue = {}
+shard_id_to_update_thread = {}
+shard_id_to_delete_request_queue = {}
+shard_id_to_delete_thread = {}
 
 # populating initial data
-for i in range(0, len(server_names)):
-    consistent_hashing.add_server(i+1, server_names[i])
-    server_name_to_number[server_names[i]] = i+1
+# for i in range(0, len(server_names)):
+#     consistent_hashing.add_server(i+1, server_names[i])
+#     server_name_to_number[server_names[i]] = i+1
 
 lock = threading.Lock()
 server_name_lock = threading.Lock()
@@ -84,7 +91,7 @@ def lower_bound_entry(ordered_map, num):
 ################################################################################################
 
 
-def worker(thread_number):
+def read_worker(thread_number):
     global count
     global server_names
     global server_name_to_number
@@ -97,7 +104,7 @@ def worker(thread_number):
 
     while True:
         # Get a request from the queue
-        request_data = request_queue.get()
+        request_data = read_request_queue.get()
 
         reqID = request_data["id"]
         shardID = request_data["shard_id"]
@@ -134,7 +141,213 @@ def worker(thread_number):
         })
 
         # Mark the task as done
-        request_queue.task_done()
+        read_request_queue.task_done()
+
+
+# Function to send write request to a server
+def send_write_request(server_name, payload, write_responses):
+    url = f'http://{server_name}:5000/write'
+    try:
+        response = requests.post(url, json=payload)
+        #return response.json(), 200
+        write_responses.append(200)
+    except Exception as e:
+        # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
+        write_responses.append(500)
+
+
+def write_worker(current_shard_id):
+    global count
+    global server_names
+    global server_name_to_number
+    global server_counter
+    global server_name_lock
+    global lock
+    global shards
+    global ShardT
+    global MapT
+    global shard_id_to_write_request_lock
+    global shard_id_to_write_request_queue
+
+    while True:
+        # Get a request from the queue
+        request_data = shard_id_to_write_request_queue[current_shard_id].get()
+
+        num_entries = request_data['num_entries']
+
+        write_payload = {
+            "shard": current_shard_id,
+            "curr_idx": ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'],
+            "data": request_data['data_entries']
+        }
+
+        write_responses = []
+
+        with shard_id_to_write_request_lock[current_shard_id]:
+            server_names_list = MapT[current_shard_id]
+            threads = []
+            for server_name in server_names_list:
+                thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses))
+                thread.start()
+                threads.append(thread)
+
+            writes_successful = True
+            error_status_code = 200
+            
+            # Wait for all threads to complete and collect the responses
+            for thread in threads:
+                thread.join()
+            for response in write_responses:
+                if response != 200:
+                    writes_successful = False
+                    error_status_code = response
+            
+            if writes_successful:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Writes successful",
+                    'responses': write_responses
+                })
+                ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] = ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] + num_entries
+            else:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Writes failed",
+                    'responses': write_responses
+                })
+
+        # Mark the task as done
+        shard_id_to_write_request_queue[current_shard_id].task_done()
+
+
+# Function to send update request to a server
+def send_update_request(server_name, payload, update_responses):
+    url = f'http://{server_name}:5000/update'
+    try:
+        response = requests.put(url, json=payload)
+        #return response.json(), 200
+        update_responses.append(200)
+    except Exception as e:
+        # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
+        update_responses.append(500)
+
+def update_worker(current_shard_id):
+    global MapT
+    global shard_id_to_write_request_lock
+    global shard_id_to_update_request_queue
+
+    while True:
+        # Get a request from the queue
+        request_data = shard_id_to_update_request_queue[current_shard_id].get()
+
+        update_payload = {
+            "shard": current_shard_id,
+            "Stud_id": request_data['Stud_id'],
+            "data": request_data['data_entry']
+        }
+
+        update_responses = []
+
+        with shard_id_to_write_request_lock[current_shard_id]:
+            server_names_list = MapT[current_shard_id]
+            threads = []
+            for server_name in server_names_list:
+                thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses))
+                thread.start()
+                threads.append(thread)
+
+            updates_successful = True
+            error_status_code = 200
+            
+            # Wait for all threads to complete and collect the responses
+            for thread in threads:
+                thread.join()
+            for response in update_responses:
+                if response != 200:
+                    updates_successful = False
+                    error_status_code = response
+
+            if updates_successful:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Updates successful",
+                    'responses': update_responses
+                })
+            else:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Updates failed",
+                    'responses': update_responses
+                })
+
+        # Mark the task as done
+        shard_id_to_update_request_queue[current_shard_id].task_done()
+
+
+# Function to send delete request to a server
+def send_delete_request(server_name, payload, delete_responses):
+    url = f'http://{server_name}:5000/del'
+    try:
+        response = requests.delete(url, json=payload)
+        #return response.json(), 200
+        delete_responses.append(200)
+        # delete_responses.append(response.json())
+    except Exception as e:
+        # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
+        delete_responses.append(500)
+        # delete_responses.append(response.json())
+
+def delete_worker(current_shard_id):
+    global MapT
+    global shard_id_to_write_request_lock
+    global shard_id_to_delete_request_queue
+
+    while True:
+        # Get a request from the queue
+        request_data = shard_id_to_delete_request_queue[current_shard_id].get()
+
+        delete_payload = {
+            "shard": current_shard_id,
+            "Stud_id": request_data['Stud_id']
+        }
+
+        delete_responses = []
+
+        with shard_id_to_write_request_lock[current_shard_id]:
+            server_names_list = MapT[current_shard_id]
+            threads = []
+            for server_name in server_names_list:
+                thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses))
+                thread.start()
+                threads.append(thread)
+
+            deletes_successful = True
+            error_status_code = 200
+            
+            # Wait for all threads to complete and collect the responses
+            for thread in threads:
+                thread.join()
+            for response in delete_responses:
+                if response != 200:
+                    deletes_successful = False
+                    error_status_code = response
+
+            if deletes_successful:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Updates successful",
+                    'responses': delete_responses
+                })
+                ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] = ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] - 1
+            else:
+                request_data['response_queue'].put({
+                    'status_code': error_status_code,
+                    'message': "Updates failed",
+                    'responses': delete_responses
+                })
+
+        # Mark the task as done
+        shard_id_to_delete_request_queue[current_shard_id].task_done()
 
 
 def heartbeat():
@@ -180,10 +393,10 @@ def heartbeat():
                 "http://load_balancer:5000/add", json=payload)
 
 
-# Create worker threads
-num_workers = 100
-for _ in range(num_workers):
-    threading.Thread(target=worker, args=(_,), daemon=True).start()
+# Create read_worker threads
+num_read_workers = 100
+for _ in range(num_read_workers):
+    threading.Thread(target=read_worker, args=(_,), daemon=True).start()
 
 # threading.Thread(target=heartbeat, daemon=True).start()
 
@@ -258,6 +471,13 @@ def add_server():
     global ShardT
     global shard_id_to_consistent_hashing
     global shard_id_to_consistent_hashing_lock
+    global shard_id_to_write_request_queue
+    global shard_id_to_write_request_lock
+    global shard_id_to_write_thread
+    global shard_id_to_update_request_queue
+    global shard_id_to_update_thread
+    global shard_id_to_delete_request_queue
+    global shard_id_to_delete_thread
 
     payload = request.json
 
@@ -313,6 +533,16 @@ def add_server():
         }
         shard_id_to_consistent_hashing_lock[shard_id] = threading.Lock()
         shard_id_to_consistent_hashing[shard_id] = ConsistentHashing(3, M, K)
+        shard_id_to_write_request_lock[shard_id] = threading.Lock()
+        shard_id_to_write_request_queue[shard_id] = queue.Queue()
+        shard_id_to_update_request_queue[shard_id] = queue.Queue()
+        shard_id_to_delete_request_queue[shard_id] = queue.Queue()
+        shard_id_to_write_thread[shard_id] = threading.Thread(target=write_worker, args=(shard_id,), daemon=True)
+        shard_id_to_write_thread[shard_id].start()
+        shard_id_to_update_thread[shard_id] = threading.Thread(target=update_worker, args=(shard_id,), daemon=True)
+        shard_id_to_update_thread[shard_id].start()
+        shard_id_to_delete_thread[shard_id] = threading.Thread(target=delete_worker, args=(shard_id,), daemon=True)
+        shard_id_to_delete_thread[shard_id].start()
 
     # list of server ids added
     server_id_list = []
@@ -410,7 +640,10 @@ def remove_server():
     global ShardT
     global shard_id_to_consistent_hashing
     global shard_id_to_consistent_hashing_lock
-
+    global shard_id_to_write_request_lock
+    global shard_id_to_write_request_queue
+    global shard_id_to_update_request_queue
+    global shard_id_to_delete_request_queue
 
     payload = request.json
     n = payload.get('n')
@@ -474,6 +707,10 @@ def remove_server():
                 del ShardT[current_shard['Stud_id_low']]
                 del shard_id_to_consistent_hashing[current_shard]
                 del shard_id_to_consistent_hashing_lock[current_shard]
+                del shard_id_to_write_request_lock[current_shard]
+                del shard_id_to_write_request_queue[current_shard]
+                del shard_id_to_delete_request_queue[current_shard]
+                del shard_id_to_update_request_queue[current_shard]
         
         del server_name_to_shards[hostname]
         
@@ -548,7 +785,7 @@ def read_data():
     
     response_queue_list = []
 
-    # putting request for each shard in request_queue
+    # putting request for each shard in read_request_queue
     for i in range(0, len(shards_queried)):
         # Create a queue for each request to handle its response
         response_queue = queue.Queue()
@@ -558,7 +795,7 @@ def read_data():
         id = random.randint(100000, 999999)
 
         # Put the request details into the shared queue
-        request_queue.put({
+        read_request_queue.put({
             'method': request.method,
             'path': request.full_path,
             'headers': request.headers,
@@ -573,7 +810,7 @@ def read_data():
    
     # waiting for response of each request and appending the results to data
     for response_queue in response_queue_list:
-        # Wait for the response from the worker thread
+        # Wait for the response from the read_worker thread
         response_data = response_queue.get()
         data.extend(response_data['data'])
 
@@ -584,6 +821,189 @@ def read_data():
     }
 
     return jsonify(response), 200
+
+
+@app.route('/write', methods=['POST'])
+def write():
+    global ShardT
+    global shard_id_to_write_request_queue
+
+    payload = request.json
+    data_entries = payload.get('data')
+
+    total_entries = len(data_entries)
+    shard_id_to_data_entries = {}
+
+    for entry in data_entries:
+        current_stud_id = entry['Stud_id']
+        possible_stud_id_low = lower_bound_entry(ShardT, current_stud_id)
+        current_shard_id = -1
+        for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+            if current_stud_id >= key:
+                if current_stud_id >= key and current_stud_id < key + value['Shard_size']:
+                    current_shard_id = value['Shard_id']
+                    break
+            else:
+                break
+        if current_shard_id == -1:
+            return jsonify({"error": f"No suitable shard found for data entry: {entry}", "status": "error"}), 500
+        if current_shard_id in shard_id_to_data_entries:
+            shard_id_to_data_entries[current_shard_id].append(entry)
+        else:
+            shard_id_to_data_entries[current_shard_id] = []
+            shard_id_to_data_entries[current_shard_id].append(entry)
+    
+    response_queue_list = []
+
+    # putting request for each shard in corresponding write_request_queue
+    for shard_id, shard_data_entries in shard_id_to_data_entries.items():
+        # Create a queue for each request to handle its response
+        response_queue = queue.Queue()
+        response_queue_list.append(response_queue)
+
+        # Put the request details into the shared queue
+        shard_id_to_write_request_queue[shard_id].put({
+            'method': request.method,
+            'path': request.full_path,
+            'headers': request.headers,
+            'data': request.get_data(),
+            'cookies': request.cookies,
+            'response_queue': response_queue,
+            'data_entries': shard_data_entries,
+            'num_entries': len(shard_id_to_data_entries[shard_id])
+        })
+    
+    # waiting for response of each request and appending the results to data
+    for response_queue in response_queue_list:
+        # Wait for the response from the read_worker thread
+        response_data = response_queue.get()
+        if response_data['status_code'] != 200:
+            response = {
+                "message": "Error while adding data entries",
+                "status": "failure"
+            }
+
+            return jsonify(response), response_data['status_code']
+
+    response = {
+        "message": f"{total_entries} Data entries added",
+        "status": "success"
+    }
+
+    return jsonify(response), 200
+
+
+@app.route('/update', methods=['PUT'])
+def update():
+    global ShardT
+    global shard_id_to_update_request_queue
+
+    payload = request.json
+    Stud_id = payload['Stud_id']
+    data = payload['data']
+
+    # finding the corresponding shard
+    possible_stud_id_low = lower_bound_entry(ShardT, Stud_id)
+    shard_id = -1
+    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+        if Stud_id >= key:
+            if Stud_id >= key and Stud_id < key + value['Shard_size']:
+                shard_id = value['Shard_id']
+                break
+        else:
+            break
+    if shard_id == -1:
+        return jsonify({"error": f"No suitable shard found", "status": "error"}), 500
+
+    # Create a queue for each request to handle its response
+    response_queue = queue.Queue()
+
+    # Put the request details into the shared queue
+    shard_id_to_update_request_queue[shard_id].put({
+        'method': request.method,
+        'path': request.full_path,
+        'headers': request.headers,
+        'data': request.get_data(),
+        'cookies': request.cookies,
+        'response_queue': response_queue,
+        'data_entry': data,
+        'Stud_id': Stud_id
+    })
+
+    # Wait for the response from the read_worker thread
+    response_data = response_queue.get()
+
+    if response_data['status_code'] != 200:
+        response = {
+            "message": "Error while updating data entry",
+            "status": "failure"
+        }
+
+        return jsonify(response), response_data['status_code']
+    else:
+        response = {
+            "message": f"Data entry for Stud_id: {Stud_id} updated",
+            "status": "success"
+        }
+
+        return jsonify(response), 200
+
+
+
+@app.route('/delete', methods=['DELETE'])
+def delete():
+    global ShardT
+    global shard_id_to_delete_request_queue
+
+    payload = request.json
+    Stud_id = payload['Stud_id']
+
+    # finding the corresponding shard
+    possible_stud_id_low = lower_bound_entry(ShardT, Stud_id)
+    shard_id = -1
+    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+        if Stud_id >= key:
+            if Stud_id >= key and Stud_id < key + value['Shard_size']:
+                shard_id = value['Shard_id']
+                break
+        else:
+            break
+    if shard_id == -1:
+        return jsonify({"error": f"No suitable shard found", "status": "error"}), 500
+
+    # Create a queue for each request to handle its response
+    response_queue = queue.Queue()
+
+    # Put the request details into the shared queue
+    shard_id_to_delete_request_queue[shard_id].put({
+        'method': request.method,
+        'path': request.full_path,
+        'headers': request.headers,
+        'data': request.get_data(),
+        'cookies': request.cookies,
+        'response_queue': response_queue,
+        'Stud_id': Stud_id
+    })
+
+    # Wait for the response from the read_worker thread
+    response_data = response_queue.get()
+
+    if response_data['status_code'] != 200:
+        response = {
+            "message": "Error while deleting data entry",
+            "status": "failure"
+            # "response": response_data['responses']
+        }
+
+        return jsonify(response), response_data['status_code']
+    else:
+        response = {
+            "message": f"Data entry with Stud_id: {Stud_id} removed from all replicas",
+            "status": "success"
+            # "response": response_data['responses']
+        }
+
+        return jsonify(response), 200
 
 
 @app.route('/<path:path>', methods=['GET'])
@@ -603,7 +1023,7 @@ def proxy_request(path):
     id = random.randint(100000, 999999)
 
     # Put the request details into the shared queue
-    request_queue.put({
+    read_request_queue.put({
         'method': request.method,
         'path': request.full_path,
         'headers': request.headers,
@@ -613,7 +1033,7 @@ def proxy_request(path):
         'id': id
     })
 
-    # Wait for the response from the worker thread
+    # Wait for the response from the read_worker thread
     response_data = response_queue.get()
 
     if response_data['data'] == "":
