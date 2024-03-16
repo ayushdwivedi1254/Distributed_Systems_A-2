@@ -3,6 +3,7 @@
 .PHONY: clean run
 
 run: clean
+	docker build -t distributed_systems_a-2-server:latest ./Server
 	docker-compose up
 
 clean:
