@@ -76,7 +76,7 @@ def convert_to_string(integers):
 def lower_bound_entry(ordered_map, num):
     keys = list(ordered_map.keys())
     left, right = 0, len(keys)
-    if right < 0:
+    if right == 0:
         return -1
     if keys[0] >= num:
         return keys[0]
@@ -1006,65 +1006,15 @@ def delete():
         return jsonify(response), 200
 
 
-@app.route('/<path:path>', methods=['GET'])
-def proxy_request(path):
-    global count
-    global server_names
-    global server_name_to_number
-    global server_counter
-    global server_name_lock
-    global lock
-    global consistent_hashing
-
-    # Create a queue for each request to handle its response
-    response_queue = queue.Queue()
-
-    # Generate random 6 digit id
-    id = random.randint(100000, 999999)
-
-    # Put the request details into the shared queue
-    read_request_queue.put({
-        'method': request.method,
-        'path': request.full_path,
-        'headers': request.headers,
-        'data': request.get_data(),
-        'cookies': request.cookies,
-        'response_queue': response_queue,
-        'id': id
-    })
-
-    # Wait for the response from the read_worker thread
-    response_data = response_queue.get()
-
-    if response_data['data'] == "":
-        return "", response_data['status_code']
-    else:
-        return jsonify({
-            'message': response_data['data'],
-            'status': "successful" if response_data['status_code'] == 200 else "failure"
-        }), response_data['status_code']
-
-@app.route('/rep', methods=['GET'])
-def get_replicas():
-    global count
-    global server_names
-    global server_name_lock
-
-    current_count=0
-    current_server_names=[]
-
-    with server_name_lock:
-        current_server_names=server_names.copy()
-        current_count=count 
-
-    response_json={
-        "message":{
-            "N": current_count,
-            "replicas": current_server_names
-        },
-        "status": "successful"
-    },
-    return jsonify(response_json),200
+# Catch-all endpoint
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    response = {
+        'error': 'Path not found',
+        'message': f'The requested path "{path}" does not exist on this server.'
+    }
+    return jsonify(response), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
