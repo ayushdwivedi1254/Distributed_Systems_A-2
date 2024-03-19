@@ -358,9 +358,11 @@ def heartbeat():
     global server_name_lock
     global lock
     global consistent_hashing
-
+    print("heartbeat started")
     while True:
         time.sleep(0.5)
+        respawn_server_names=[]
+        serv_to_shards={}
 
         with server_name_lock:
             current_server_names = server_names.copy()
@@ -369,25 +371,70 @@ def heartbeat():
             try:
                 response = requests.get(
                     f"http://{server_name}:5000/heartbeat")
+                # print(response)
                 response.raise_for_status()
             except requests.RequestException:
 
                 with server_name_lock:
                     if server_name in server_names:
+                        print("Found failed server:"+server_name)
+                        respawn_server_names.append(server_name)
+                        serv_to_shards[server_name]=server_name_to_shards[server_name]
                         server_names.remove(server_name)
-                        count -= 1
-
-                with lock:
-                    consistent_hashing.remove_server(
-                        server_name_to_number[server_name], server_name)
-
+                        # count -= 1
+                        # clear metadata of killed server
+                        for current_shard in server_name_to_shards[server_name]:
+                            # try:
+                            MapT[current_shard].discard(server_name)
+                            with shard_id_to_consistent_hashing_lock[current_shard]:
+                                shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[server_name], server_name)
+                            if(len(MapT[current_shard]) == 0):
+                                del MapT[current_shard]
+                                del shards[current_shard]
+                                del ShardT[current_shard['Stud_id_low']]
+                                del shard_id_to_consistent_hashing[current_shard]
+                                del shard_id_to_consistent_hashing_lock[current_shard]
+                                del shard_id_to_write_request_lock[current_shard]
+                                del shard_id_to_write_request_queue[current_shard]
+                                del shard_id_to_delete_request_queue[current_shard]
+                                del shard_id_to_update_request_queue[current_shard]
+                        #     except:
+                        #         pass
+                        # try:
+                        del server_name_to_shards[server_name]
+                        # except:
+                        #     pass
+                        
+                # with lock:
+                #     consistent_hashing.remove_server(
+                #         server_name_to_number[server_name], server_name)
+            
         with server_name_lock:
             current_server_names = server_names.copy()
-        if len(current_server_names) < N:
-            servers_to_add = N-len(current_server_names)
+            
+        # print(N)
+        # print(current_server_names)
+        if len(current_server_names) < count and len(respawn_server_names)>0:
+        # if len(current_server_names) < count:
+            count=len(current_server_names)
+            # print("inside loop\n")
+            # print(respawn_server_names)
+            # print("\n")
+            servers_to_add = len(respawn_server_names)
+            new_names=[]
+            
+            servers_dict={}
+            for serv in respawn_server_names:
+                num=random.randint(100000,999999)
+                name=f"Server{num}"
+                new_names.append(name)
+                servers_dict[name]=serv_to_shards[serv]
+
+
             payload = {
                 'n': servers_to_add,
-                'hostnames': []
+                'new_shards':[],
+                'servers' : servers_dict
             }
             response = requests.post(
                 "http://load_balancer:5000/add", json=payload)
@@ -398,12 +445,12 @@ num_read_workers = 100
 for _ in range(num_read_workers):
     threading.Thread(target=read_worker, args=(_,), daemon=True).start()
 
-# threading.Thread(target=heartbeat, daemon=True).start()
+threading.Thread(target=heartbeat, daemon=True).start()
 
 @app.route('/init', methods=['POST'])
 def initialize_database():
     global schema
-
+    # global N
     payload = request.json
 
     # Processing the payload
@@ -680,7 +727,8 @@ def remove_server():
             hostname = hostnames[i]
         else:
             hostname = random.choice(server_names)
-
+        with server_name_lock:
+            count -= 1
         res1 = os.system(f'sudo docker stop {hostname}')
         res2 = os.system(f'sudo docker rm {hostname}')
 
@@ -689,30 +737,50 @@ def remove_server():
                 "message": f"<Error> Failed to remove server {hostname}",
                 "status": "failure"
             }
+            with server_name_lock:
+                count+=1
             return jsonify(response_json), 400
+        
+        flag=0
         with server_name_lock:
             if hostname in server_names:
+                flag=1
                 server_names.remove(hostname)
-                count -= 1
-        
+                for current_shard in server_name_to_shards[hostname]:
+                    MapT[current_shard].discard(hostname)
+                    with shard_id_to_consistent_hashing_lock[current_shard]:
+                        shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
+                    if(len(MapT[current_shard]) == 0):
+                        del MapT[current_shard]
+                        del shards[current_shard]
+                        del ShardT[current_shard['Stud_id_low']]
+                        del shard_id_to_consistent_hashing[current_shard]
+                        del shard_id_to_consistent_hashing_lock[current_shard]
+                        del shard_id_to_write_request_lock[current_shard]
+                        del shard_id_to_write_request_queue[current_shard]
+                        del shard_id_to_delete_request_queue[current_shard]
+                        del shard_id_to_update_request_queue[current_shard]
+                
+                del server_name_to_shards[hostname] 
+                
         removed_server_name_list.append(hostname)
-
-        for current_shard in server_name_to_shards[hostname]:
-            MapT[current_shard].discard(hostname)
-            with shard_id_to_consistent_hashing_lock[current_shard]:
-                shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
-            if(len(MapT[current_shard]) == 0):
-                del MapT[current_shard]
-                del shards[current_shard]
-                del ShardT[current_shard['Stud_id_low']]
-                del shard_id_to_consistent_hashing[current_shard]
-                del shard_id_to_consistent_hashing_lock[current_shard]
-                del shard_id_to_write_request_lock[current_shard]
-                del shard_id_to_write_request_queue[current_shard]
-                del shard_id_to_delete_request_queue[current_shard]
-                del shard_id_to_update_request_queue[current_shard]
-        
-        del server_name_to_shards[hostname]
+        # if flag==1:
+        #     for current_shard in server_name_to_shards[hostname]:
+        #         MapT[current_shard].discard(hostname)
+        #         with shard_id_to_consistent_hashing_lock[current_shard]:
+        #             shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
+        #         if(len(MapT[current_shard]) == 0):
+        #             del MapT[current_shard]
+        #             del shards[current_shard]
+        #             del ShardT[current_shard['Stud_id_low']]
+        #             del shard_id_to_consistent_hashing[current_shard]
+        #             del shard_id_to_consistent_hashing_lock[current_shard]
+        #             del shard_id_to_write_request_lock[current_shard]
+        #             del shard_id_to_write_request_queue[current_shard]
+        #             del shard_id_to_delete_request_queue[current_shard]
+        #             del shard_id_to_update_request_queue[current_shard]
+            
+        #     del server_name_to_shards[hostname]
         
         # remove the server from consistent_hashing of all shards
 
