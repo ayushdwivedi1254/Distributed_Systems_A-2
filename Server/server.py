@@ -2,6 +2,7 @@ from flask import Flask, request,jsonify
 import os,socket,subprocess,json
 # import mysql.connector
 import psycopg2
+from psycopg2 import errorcodes
 
 app = Flask(__name__)
 
@@ -38,12 +39,16 @@ def connect_to_database():
     except Exception as e:
         print(f"Error connecting to database:{str(e)}",500)
         return
-
-    db_connection.autocommit = True
-    create_database_query="CREATE DATABASE distributed_database;"
+    
     cursor = db_connection.cursor()
-    cursor.execute(create_database_query)
+    cursor.execute("SELECT datname FROM pg_catalog.pg_database WHERE datname = 'distributed_database';")
     db_connection.commit()
+    if cursor.fetchone() is None:
+        db_connection.autocommit = True
+        create_database_query="CREATE DATABASE distributed_database;"
+        cursor.execute(create_database_query)
+        db_connection.commit()
+    
     cursor.close()
 
     db_connection = psycopg2.connect(
@@ -56,6 +61,7 @@ def connect_to_database():
 
 @app.route('/config', methods=['POST'])
 def config():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -66,6 +72,9 @@ def config():
     for shard in shards:
         # columns=""
         columns = ', '.join([f'{col} {data_type_mapping[dtype]}' for col, dtype in zip(schema['columns'], schema['dtypes'])])
+        columns = columns.split(', ')
+        columns[0] += ' PRIMARY KEY'
+        columns = ', '.join(columns)
         # for col, dtype in zip(schema['columns'], schema['dtypes']):
             # columns+=(f'{col} {data_type_mapping[dtype]}')
             # columns+=','
@@ -99,6 +108,7 @@ def heartbeat():
 
 @app.route('/copy', methods=['GET'])
 def copy():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -129,6 +139,7 @@ def copy():
 
 @app.route('/read', methods=['POST'])
 def read():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -162,6 +173,7 @@ def read():
 
 @app.route('/write', methods=['POST'])
 def write():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -171,17 +183,44 @@ def write():
     data=request_payload.get('data',[])
 
     cursor = db_connection.cursor()
-    
+    old_curr_idx=curr_idx
+
     for entry in data:
         columns = ', '.join(entry.keys())
         values = ', '.join(f'{value}' if isinstance(value,int) else f"'{value}'" for value in entry.values())
         insert_query=f'INSERT INTO {shard} ({columns}) VALUES ({values});'
-        cursor.execute(insert_query)
+        try:
+            cursor.execute(insert_query)
+        except psycopg2.Error as e:
+            if e.pgcode==errorcodes.UNIQUE_VIOLATION:
+                curr_idx=old_curr_idx
+                response_json = {
+                    "message": f"Duplicate entry for student ID {entry['Stud_id']}",
+                    "failed_entries":data,
+                    "current_idx": curr_idx,
+                    "status": "failure"
+                }
+                cursor.close()
+                db_connection.close()
+                db_connection=None
+                return jsonify(response_json),500
+            else:
+                curr_idx=old_curr_idx
+                response_json = {
+                    "message": f"Error when writing into the database",
+                    "failed_entries":data,
+                    "current_idx": curr_idx,
+                    "status": "failure"
+                }
+                cursor.close()
+                db_connection.close()
+                db_connection=None
+                return jsonify(response_json),500 
         curr_idx+=1
-        db_connection.commit()
     
     cursor.close()
-
+    db_connection.commit()
+        
     response_json = {
         "message": "Data entries added",
         "current_idx": curr_idx,
@@ -192,6 +231,7 @@ def write():
 
 @app.route('/update', methods=['PUT'])
 def update():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -204,23 +244,55 @@ def update():
     values=list(data.values())
 
     cursor = db_connection.cursor()
-    
-    set_clause=', '.join([f"{column}=%s" for column in columns])
-    update_query=f'UPDATE {shard} SET {set_clause} WHERE stud_id={stud_id};'
-    cursor.execute(update_query,values)
-    db_connection.commit()
-    
-    cursor.close()
 
-    response_json = {
-        "message": f"Data entry for Stud_id:{stud_id} updated",
-        "status": "success"
-    }
+    check_query = f"SELECT * FROM {shard} WHERE stud_id = %s;"
+    cursor.execute(check_query, (stud_id,))
+    existing_record = cursor.fetchone()  # Fetch one record
+    
+    if existing_record:
+        set_clause=', '.join([f"{column}=%s" for column in columns])
+        update_query=f'UPDATE {shard} SET {set_clause} WHERE stud_id={stud_id};'
+        try:
+            cursor.execute(update_query,values)
+        except psycopg2.Error as e:
+            if e.pgcode==errorcodes.UNIQUE_VIOLATION:
+                response_json = {
+                    "message": f"Duplicate entry for student ID {stud_id}",
+                    "status": "failure"
+                }
+                cursor.close()
+                db_connection.close()
+                db_connection=None
+                return jsonify(response_json),500
+            else:
+                response_json = {
+                    "message": f"Error when updating database",
+                    "status": "failure"
+                }
+                cursor.close()
+                db_connection.close()
+                db_connection=None
+                return jsonify(response_json),500
 
-    return jsonify(response_json), 200
+        cursor.close()
+        db_connection.commit()
+
+        response_json = {
+            "message": f"Data entry for Stud_id:{stud_id} updated",
+            "status": "success"
+        }
+        return jsonify(response_json), 200
+    else:
+        cursor.close()
+        response_json = {
+            "message": f"No record found for Stud_id: {stud_id}",
+            "status": "failure"
+        }
+        return jsonify(response_json), 500
 
 @app.route('/del', methods=['DELETE'])
 def delete():
+    global db_connection
     while db_connection is None:
         connect_to_database()
 
@@ -230,18 +302,29 @@ def delete():
 
     cursor = db_connection.cursor()
     
-    delete_query=f'DELETE FROM {shard} WHERE stud_id={stud_id};'
-    cursor.execute(delete_query)
-    db_connection.commit()
+    check_query = f"SELECT * FROM {shard} WHERE stud_id = %s;"
+    cursor.execute(check_query, (stud_id,))
+    existing_record = cursor.fetchone()  # Fetch one record
+
+    if existing_record:
+        delete_query=f'DELETE FROM {shard} WHERE stud_id={stud_id};'
+        cursor.execute(delete_query)
+        db_connection.commit()
     
-    cursor.close()
+        cursor.close()
 
-    response_json = {
-        "message": f"Data entry with Stud_id:{stud_id} removed",
-        "status": "success"
-    }
-
-    return jsonify(response_json), 200
+        response_json = {
+            "message": f"Data entry with Stud_id:{stud_id} removed",
+            "status": "success"
+        }
+        return jsonify(response_json), 200
+    else:
+        cursor.close()
+        response_json = {
+            "message": f"No record found for Stud_id: {stud_id}",
+            "status": "failure"
+        }
+        return jsonify(response_json), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
