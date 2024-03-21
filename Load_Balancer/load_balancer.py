@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from sortedcontainers import SortedDict
 from itertools import dropwhile
-
+import re
 from ConsistentHashing import ConsistentHashing
 
 app = Flask(__name__)
@@ -39,6 +39,7 @@ ShardT = SortedDict()
 schema = {}
 shards = {}
 server_name_to_shards = {}
+valid_server_name={}
 shard_id_to_consistent_hashing = {}
 shard_id_to_consistent_hashing_lock = {}
 shard_id_to_write_request_lock = {}
@@ -88,6 +89,9 @@ def lower_bound_entry(ordered_map, num):
             right = mid
     return keys[left]
 
+def is_valid_docker_name(name):
+    pattern = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,253}$"
+    return re.match(pattern, name) is not None and len(name) <= 255
 ################################################################################################
 
 
@@ -123,7 +127,7 @@ def read_worker(thread_number):
                     "shard": shardID,
                     "Stud_id": {"low":low_stud_id, "high":high_stud_id}
                 }
-                url = f'http://{serverName}:5000/read'
+                url = f'http://{valid_server_name[serverName]}:5000/read'
                 response = requests.post(url, json=read_payload)
                 break
             except requests.RequestException as e:
@@ -146,7 +150,7 @@ def read_worker(thread_number):
 
 # Function to send write request to a server
 def send_write_request(server_name, payload, write_responses):
-    url = f'http://{server_name}:5000/write'
+    url = f'http://{valid_server_name[server_name]}:5000/write'
     try:
         response = requests.post(url, json=payload)
         #return response.json(), 200
@@ -222,7 +226,7 @@ def write_worker(current_shard_id):
 
 # Function to send update request to a server
 def send_update_request(server_name, payload, update_responses):
-    url = f'http://{server_name}:5000/update'
+    url = f'http://{valid_server_name[server_name]}:5000/update'
     try:
         response = requests.put(url, json=payload)
         #return response.json(), 200
@@ -286,7 +290,7 @@ def update_worker(current_shard_id):
 
 # Function to send delete request to a server
 def send_delete_request(server_name, payload, delete_responses):
-    url = f'http://{server_name}:5000/del'
+    url = f'http://{valid_server_name[server_name]}:5000/del'
     try:
         response = requests.delete(url, json=payload)
         #return response.json(), 200
@@ -370,7 +374,7 @@ def heartbeat():
         for server_name in current_server_names:
             try:
                 response = requests.get(
-                    f"http://{server_name}:5000/heartbeat")
+                    f"http://{valid_server_name[server_name]}:5000/heartbeat")
                 # print(response)
                 response.raise_for_status()
             except requests.RequestException:
@@ -599,9 +603,16 @@ def add_server():
         hostname = None
         # flag = 0
         if (i < len(hostnames)):
-            hostname = hostnames[i]
+            num=random.randint(100000,999999)
+            name=f"Server{num}"
+            hostname=hostnames[i]
+            if is_valid_docker_name(hostname):
+                valid_server_name[hostname]=hostname
+            else:
+                valid_server_name[hostname]=name
+            validname = valid_server_name[hostname]
             res = os.popen(
-                f'sudo docker run --name "{hostname}" --network distributed_systems_a-2_net1 --network-alias "{hostname}" -e HOSTNAME="{hostname}" -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-2-server').read()
+                f'sudo docker run --name "{validname}" --network distributed_systems_a-2_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -d distributed_systems_a-2-server').read()
         # else:
         #     res = os.popen(
         #         f'sudo docker run --network distributed_systems_a-2_net1 -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-2-server').read()
@@ -618,21 +629,21 @@ def add_server():
             # if flag:
             #     hostname = hostname[:12]
             while True:
-                inspect_command = f'curl --fail --silent --output /dev/null --write-out "%{{http_code}}" http://{hostname}:5000/heartbeat'
+                inspect_command = f'curl --fail --silent --output /dev/null --write-out "%{{http_code}}" http://{validname}:5000/heartbeat'
                 container_status = os.popen(inspect_command).read().strip()
                 if container_status == '200':
                     break
                 else:
                     time.sleep(0.1)
             
-            server_id_list.append(server_counter+1)
+            server_id_list.append(num)
 
             with server_name_lock:
                 count += 1
                 server_names.append(hostname)
 
-            server_counter += 1
-            server_name_to_number[hostname] = server_counter
+            # server_counter += 1
+            server_name_to_number[hostname] = num
 
             server_name_to_shards[hostname] = servers[hostname]
             # populating MapT
@@ -644,7 +655,7 @@ def add_server():
                 "schema": schema,
                 "shards": servers[hostname]
             }
-            url = f'http://{hostname}:5000/config'
+            url = f'http://{validname}:5000/config'
             config_response = requests.post(url, json=config_payload)
             if config_response.status_code != 200:
                 return jsonify({
@@ -655,7 +666,7 @@ def add_server():
             # to the consistent_hashing of each shard, add the server
             for current_shard in servers[hostname]:
                 with shard_id_to_consistent_hashing_lock[current_shard]:
-                    shard_id_to_consistent_hashing[current_shard].add_server(server_counter, hostname)
+                    shard_id_to_consistent_hashing[current_shard].add_server(num, hostname)
                 
             # with lock:
             #     consistent_hashing.add_server(server_counter, hostname)
@@ -729,8 +740,9 @@ def remove_server():
             hostname = random.choice(server_names)
         with server_name_lock:
             count -= 1
-        res1 = os.system(f'sudo docker stop {hostname}')
-        res2 = os.system(f'sudo docker rm {hostname}')
+        validname=valid_server_name[hostname]
+        res1 = os.system(f'sudo docker stop {validname}')
+        res2 = os.system(f'sudo docker rm {validname}')
 
         if res1 != 0 or res2 != 0:
             response_json = {
@@ -741,10 +753,8 @@ def remove_server():
                 count+=1
             return jsonify(response_json), 400
         
-        flag=0
         with server_name_lock:
             if hostname in server_names:
-                flag=1
                 server_names.remove(hostname)
                 for current_shard in server_name_to_shards[hostname]:
                     MapT[current_shard].discard(hostname)
