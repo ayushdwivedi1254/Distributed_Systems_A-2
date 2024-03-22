@@ -71,7 +71,7 @@ def config():
 
     for shard in shards:
         # columns=""
-        columns = ', '.join([f'{col} {data_type_mapping[dtype]}' for col, dtype in zip(schema['columns'], schema['dtypes'])])
+        columns = ', '.join([f'"{col}" {data_type_mapping[dtype]}' for col, dtype in zip(schema['columns'], schema['dtypes'])])
         columns = columns.split(', ')
         columns[0] += ' PRIMARY KEY'
         columns = ', '.join(columns)
@@ -152,7 +152,7 @@ def read():
     response_data = []
 
     cursor = db_connection.cursor()
-    cursor.execute(f"SELECT * FROM {shard} WHERE Stud_id BETWEEN {low} AND {high};")
+    cursor.execute(f'SELECT * FROM {shard} WHERE "Stud_id" BETWEEN {low} AND {high};')
     data = cursor.fetchall()
     cursor.close()
 
@@ -186,7 +186,7 @@ def write():
     old_curr_idx=curr_idx
 
     for entry in data:
-        columns = ', '.join(entry.keys())
+        columns = ', '.join(['"' + key + '"' for key in entry.keys()])
         values = ', '.join(f'{value}' if isinstance(value,int) else f"'{value}'" for value in entry.values())
         insert_query=f'INSERT INTO {shard} ({columns}) VALUES ({values});'
         try:
@@ -245,13 +245,13 @@ def update():
 
     cursor = db_connection.cursor()
 
-    check_query = f"SELECT * FROM {shard} WHERE stud_id = %s;"
+    check_query = f'SELECT * FROM {shard} WHERE "Stud_id" = %s;'
     cursor.execute(check_query, (stud_id,))
     existing_record = cursor.fetchone()  # Fetch one record
     
     if existing_record:
-        set_clause=', '.join([f"{column}=%s" for column in columns])
-        update_query=f'UPDATE {shard} SET {set_clause} WHERE stud_id={stud_id};'
+        set_clause=', '.join([f'"{column}"=%s' for column in columns])
+        update_query=f'UPDATE {shard} SET {set_clause} WHERE "Stud_id"={stud_id};'
         try:
             cursor.execute(update_query,values)
         except psycopg2.Error as e:
@@ -278,7 +278,7 @@ def update():
         db_connection.commit()
 
         response_json = {
-            "message": f"Data entry for Stud_id:{stud_id} updated",
+            "message": f"Data entry for Stud_id: {stud_id} updated",
             "status": "success"
         }
         return jsonify(response_json), 200
@@ -302,19 +302,19 @@ def delete():
 
     cursor = db_connection.cursor()
     
-    check_query = f"SELECT * FROM {shard} WHERE stud_id = %s;"
+    check_query = f'SELECT * FROM {shard} WHERE "Stud_id" = %s;'
     cursor.execute(check_query, (stud_id,))
     existing_record = cursor.fetchone()  # Fetch one record
 
     if existing_record:
-        delete_query=f'DELETE FROM {shard} WHERE stud_id={stud_id};'
+        delete_query=f'DELETE FROM {shard} WHERE "Stud_id"={stud_id};'
         cursor.execute(delete_query)
         db_connection.commit()
     
         cursor.close()
 
         response_json = {
-            "message": f"Data entry with Stud_id:{stud_id} removed",
+            "message": f"Data entry with Stud_id: {stud_id} removed",
             "status": "success"
         }
         return jsonify(response_json), 200
