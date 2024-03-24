@@ -468,6 +468,29 @@ def initialize_database():
     shards_list = payload.get('shards', [])
     servers = payload.get('servers', {})
 
+    # Populating servers with empty shard list with at most 3 shards
+    shard_allotments = {}
+    for shard_id, server_ids in MapT.items():
+        shard_allotments[shard_id] = len(server_ids)
+    for shard in shards_list:
+        shard_allotments[shard['Shard_id']] = 0
+    for server, shards in servers.items():
+        for shard_id in shards:
+            shard_allotments[shard_id] += 1
+    empty_servers = [server for server, shards in servers.items() if not shards]
+
+    for empty_server in empty_servers:
+        for _ in range(0, 3):
+            shard_allotted = ""
+            min_count = 1000000
+            for shard_id, count in shard_allotments.items():
+                if count <= min_count and shard_id not in servers[empty_server]:
+                    min_count = count
+                    shard_allotted = shard_id
+            if min_count != 1000000:
+                servers[empty_server].append(shard_allotted)
+                shard_allotments[shard_allotted] += 1
+
     add_endpoint_payload = {
         "n": N,
         "new_shards": shards_list,
@@ -772,25 +795,6 @@ def remove_server():
                 del server_name_to_shards[hostname] 
                 
         removed_server_name_list.append(hostname)
-        # if flag==1:
-        #     for current_shard in server_name_to_shards[hostname]:
-        #         MapT[current_shard].discard(hostname)
-        #         with shard_id_to_consistent_hashing_lock[current_shard]:
-        #             shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
-        #         if(len(MapT[current_shard]) == 0):
-        #             del MapT[current_shard]
-        #             del shards[current_shard]
-        #             del ShardT[current_shard['Stud_id_low']]
-        #             del shard_id_to_consistent_hashing[current_shard]
-        #             del shard_id_to_consistent_hashing_lock[current_shard]
-        #             del shard_id_to_write_request_lock[current_shard]
-        #             del shard_id_to_write_request_queue[current_shard]
-        #             del shard_id_to_delete_request_queue[current_shard]
-        #             del shard_id_to_update_request_queue[current_shard]
-            
-        #     del server_name_to_shards[hostname]
-        
-        # remove the server from consistent_hashing of all shards
 
     with server_name_lock:
         count_copy = count
