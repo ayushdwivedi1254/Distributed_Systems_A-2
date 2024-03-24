@@ -25,8 +25,6 @@ server_names = []
 # Shared queue for incoming read requests
 read_request_queue = queue.Queue()
 
-# server number counter and map
-server_counter = N
 server_name_to_number = {}
 # Consistent hashing object
 M = 512
@@ -53,11 +51,6 @@ suggested_random_server_id = []
 suggested_random_server_id_lock = threading.Lock()
 removed_servers = []
 removed_servers_lock = threading.Lock()
-
-# populating initial data
-# for i in range(0, len(server_names)):
-#     consistent_hashing.add_server(i+1, server_names[i])
-#     server_name_to_number[server_names[i]] = i+1
 
 lock = threading.Lock()
 server_name_lock = threading.Lock()
@@ -125,8 +118,6 @@ def generate_id(hostname):
 def read_worker(thread_number):
     global count
     global server_names
-    global server_name_to_number
-    global server_counter
     global server_name_lock
     global lock
     global consistent_hashing
@@ -190,8 +181,6 @@ def send_write_request(server_name, payload, write_responses):
 def write_worker(current_shard_id):
     global count
     global server_names
-    global server_name_to_number
-    global server_counter
     global server_name_lock
     global lock
     global shards
@@ -385,7 +374,6 @@ def heartbeat():
     global count
     global server_names
     global server_name_to_number
-    global server_counter
     global server_name_lock
     global lock
     global consistent_hashing
@@ -421,6 +409,8 @@ def heartbeat():
                         # del valid_server_name[server_name]
                         count -= 1
                         # clear metadata of killed server
+                        with suggested_random_server_id_lock:
+                            suggested_random_server_id.remove(server_name_to_number[server_name])
                         for current_shard in server_name_to_shards[server_name]:
                             MapT[current_shard].discard(server_name)
                             with shard_id_to_consistent_hashing_lock[current_shard]:
@@ -527,7 +517,6 @@ def add_server():
     global count
     global server_names
     global server_name_to_number
-    global server_counter
     global server_name_lock
     global lock
     global shards
@@ -650,7 +639,6 @@ def add_server():
                 count += 1
                 server_names.append(hostname)
 
-            # server_counter += 1
             server_name_to_number[hostname] = num
 
             server_name_to_shards[hostname] = servers[hostname]
@@ -675,9 +663,6 @@ def add_server():
             for current_shard in servers[hostname]:
                 with shard_id_to_consistent_hashing_lock[current_shard]:
                     shard_id_to_consistent_hashing[current_shard].add_server(num, hostname)
-                
-            # with lock:
-            #     consistent_hashing.add_server(server_counter, hostname)
 
     with server_name_lock:
         count_copy = count
@@ -696,7 +681,6 @@ def remove_server():
     global count
     global server_names
     global server_name_to_number
-    global server_counter
     global server_name_lock
     global lock
     global shards
@@ -767,6 +751,8 @@ def remove_server():
         with server_name_lock:
             if hostname in server_names:
                 server_names.remove(hostname)
+                with suggested_random_server_id_lock:
+                    suggested_random_server_id.remove(server_name_to_number[hostname])
                 # del valid_server_name[hostname]
                 for current_shard in server_name_to_shards[hostname]:
                     MapT[current_shard].discard(hostname)
@@ -806,12 +792,6 @@ def remove_server():
         
         # remove the server from consistent_hashing of all shards
 
-
-        # with lock:
-        #     consistent_hashing.remove_server(
-        #         server_name_to_number[hostname], hostname)
-        # # server_name_to_number.pop(hostname)
-
     with server_name_lock:
         count_copy = count
 
@@ -839,6 +819,13 @@ def read_data():
 
     # Iterate over the range of Student IDs to determine shards to query
     data = []
+
+    if low_id > high_id:
+        response = {
+            "message": "<Error> Low id is greater than high id",
+            "status": "failure"
+        }
+        return jsonify(response), 400
 
     # find the shards
     starting_stud_id_low = lower_bound_entry(ShardT, low_id)
