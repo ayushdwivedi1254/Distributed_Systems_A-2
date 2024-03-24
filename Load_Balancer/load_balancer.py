@@ -49,6 +49,10 @@ shard_id_to_update_request_queue = {}
 shard_id_to_update_thread = {}
 shard_id_to_delete_request_queue = {}
 shard_id_to_delete_thread = {}
+suggested_random_server_id = []
+suggested_random_server_id_lock = threading.Lock()
+removed_servers = []
+removed_servers_lock = threading.Lock()
 
 # populating initial data
 # for i in range(0, len(server_names)):
@@ -92,6 +96,29 @@ def lower_bound_entry(ordered_map, num):
 def is_valid_docker_name(name):
     pattern = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,253}$"
     return re.match(pattern, name) is not None and len(name) <= 255
+
+def generate_id(hostname):
+    global suggested_random_server_id
+    global suggested_random_server_id_lock
+
+    # Regular expression to match hostname of the form Server{some_number} or server{some_number}
+    pattern = re.compile(r'^Server(\d+)$', re.IGNORECASE)
+
+    match = pattern.match(hostname)
+    if match:
+        some_number = int(match.group(1))
+        with suggested_random_server_id_lock:
+            if some_number not in suggested_random_server_id:
+                suggested_random_server_id.append(some_number)
+                return some_number
+
+    # Generate a random id if the hostname doesn't match the pattern or some_number is already in the id_list
+    while True:
+        with suggested_random_server_id_lock:
+            new_id = random.randint(100000, 999999)
+            if new_id not in suggested_random_server_id:
+                suggested_random_server_id.append(new_id)
+                return new_id
 ################################################################################################
 
 
@@ -362,6 +389,9 @@ def heartbeat():
     global server_name_lock
     global lock
     global consistent_hashing
+    global valid_server_name
+    global removed_servers
+    global removed_servers_lock
     print("heartbeat started")
     while True:
         time.sleep(0.5)
@@ -371,59 +401,34 @@ def heartbeat():
         with server_name_lock:
             current_server_names = server_names.copy()
 
+        # print("Going to enter for loop")
+
         for server_name in current_server_names:
             try:
+                # print(f"Inside loop for server: {server_name}")
                 response = requests.get(
                     f"http://{valid_server_name[server_name]}:5000/heartbeat")
-                # print(response)
                 response.raise_for_status()
             except requests.RequestException:
-
+                # print(f"In exception for server: {server_name}")
+                with removed_servers_lock:
+                    removed_servers_copy = removed_servers.copy()
                 with server_name_lock:
-                    if server_name in server_names:
-                        print("Found failed server:"+server_name)
+                    if server_name not in removed_servers_copy:
                         respawn_server_names.append(server_name)
                         serv_to_shards[server_name]=server_name_to_shards[server_name]
                         server_names.remove(server_name)
-                        # count -= 1
+                        # del valid_server_name[server_name]
+                        count -= 1
                         # clear metadata of killed server
                         for current_shard in server_name_to_shards[server_name]:
-                            # try:
                             MapT[current_shard].discard(server_name)
                             with shard_id_to_consistent_hashing_lock[current_shard]:
                                 shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[server_name], server_name)
-                            if(len(MapT[current_shard]) == 0):
-                                del MapT[current_shard]
-                                del shards[current_shard]
-                                del ShardT[current_shard['Stud_id_low']]
-                                del shard_id_to_consistent_hashing[current_shard]
-                                del shard_id_to_consistent_hashing_lock[current_shard]
-                                del shard_id_to_write_request_lock[current_shard]
-                                del shard_id_to_write_request_queue[current_shard]
-                                del shard_id_to_delete_request_queue[current_shard]
-                                del shard_id_to_update_request_queue[current_shard]
-                        #     except:
-                        #         pass
-                        # try:
                         del server_name_to_shards[server_name]
-                        # except:
-                        #     pass
-                        
-                # with lock:
-                #     consistent_hashing.remove_server(
-                #         server_name_to_number[server_name], server_name)
-            
-        with server_name_lock:
-            current_server_names = server_names.copy()
-            
-        # print(N)
-        # print(current_server_names)
-        if len(current_server_names) < count and len(respawn_server_names)>0:
-        # if len(current_server_names) < count:
-            count=len(current_server_names)
-            # print("inside loop\n")
-            # print(respawn_server_names)
-            # print("\n")
+            # print(f"Request done for server: {server_name}")
+
+        if len(respawn_server_names)>0:
             servers_to_add = len(respawn_server_names)
             new_names=[]
             
@@ -434,14 +439,24 @@ def heartbeat():
                 new_names.append(name)
                 servers_dict[name]=serv_to_shards[serv]
 
-
             payload = {
                 'n': servers_to_add,
                 'new_shards':[],
                 'servers' : servers_dict
             }
+            # print("going to send payload")
             response = requests.post(
                 "http://load_balancer:5000/add", json=payload)
+        
+        with server_name_lock:
+            current_server_names = server_names.copy()
+        with removed_servers_lock:
+            removed_servers_copy = removed_servers.copy()
+
+        for server_name in removed_servers_copy:
+            if server_name not in current_server_names:
+                with removed_servers_lock:
+                    removed_servers.remove(server_name)
 
 
 # Create read_worker threads
@@ -529,6 +544,7 @@ def add_server():
     global shard_id_to_update_thread
     global shard_id_to_delete_request_queue
     global shard_id_to_delete_thread
+    global valid_server_name
 
     payload = request.json
 
@@ -603,21 +619,13 @@ def add_server():
         hostname = None
         # flag = 0
         if (i < len(hostnames)):
-            num=random.randint(100000,999999)
-            name=f"Server{num}"
             hostname=hostnames[i]
-            if is_valid_docker_name(hostname):
-                valid_server_name[hostname]=hostname
-            else:
-                valid_server_name[hostname]=name
+            num=generate_id(hostname)
+            name=f"Server{num}"
+            valid_server_name[hostname]=name
             validname = valid_server_name[hostname]
             res = os.popen(
                 f'sudo docker run --name "{validname}" --network distributed_systems_a-2_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -d distributed_systems_a-2-server').read()
-        # else:
-        #     res = os.popen(
-        #         f'sudo docker run --network distributed_systems_a-2_net1 -e SERVER_ID="{server_counter+1}" -d distributed_systems_a-2-server').read()
-        #     hostname = res
-        #     flag = 1
 
         if len(res) == 0:
             response_json = {
@@ -691,7 +699,6 @@ def remove_server():
     global server_counter
     global server_name_lock
     global lock
-    # global consistent_hashing
     global shards
     global MapT
     global server_name_to_shards
@@ -702,6 +709,8 @@ def remove_server():
     global shard_id_to_write_request_queue
     global shard_id_to_update_request_queue
     global shard_id_to_delete_request_queue
+    global removed_servers
+    global removed_servers_lock
 
     payload = request.json
     n = payload.get('n')
@@ -740,6 +749,8 @@ def remove_server():
             hostname = random.choice(server_names)
         with server_name_lock:
             count -= 1
+        with removed_servers_lock:
+            removed_servers.append(hostname)        
         validname=valid_server_name[hostname]
         res1 = os.system(f'sudo docker stop {validname}')
         res2 = os.system(f'sudo docker rm {validname}')
@@ -756,14 +767,15 @@ def remove_server():
         with server_name_lock:
             if hostname in server_names:
                 server_names.remove(hostname)
+                # del valid_server_name[hostname]
                 for current_shard in server_name_to_shards[hostname]:
                     MapT[current_shard].discard(hostname)
                     with shard_id_to_consistent_hashing_lock[current_shard]:
                         shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
                     if(len(MapT[current_shard]) == 0):
                         del MapT[current_shard]
+                        del ShardT[shards[current_shard]['Stud_id_low']]
                         del shards[current_shard]
-                        del ShardT[current_shard['Stud_id_low']]
                         del shard_id_to_consistent_hashing[current_shard]
                         del shard_id_to_consistent_hashing_lock[current_shard]
                         del shard_id_to_write_request_lock[current_shard]
