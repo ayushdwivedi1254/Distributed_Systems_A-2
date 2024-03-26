@@ -7,7 +7,7 @@ import time
 async def make_request(session, url, payload):
     async with session.post(url, json=payload) as response:
         res = await response.text()
-        print(res)
+        # print(res)
         return res
 
 async def generate_requests():
@@ -18,15 +18,15 @@ async def generate_requests():
         start_time = time.time()
         for _ in range(10000):
             data_entries = []
-            for _ in range(10):
+            # for _ in range(10):
                 # Generate a random data entry
-                num=randint(0, 12287)
-                data_entry = {
-                    "Stud_id": num,
-                    "Stud_name": f"Student{num}",
-                    "Stud_marks": randint(0, 100)
-                }
-                data_entries.append(data_entry)
+            num=randint(0, 16383)
+            data_entry = {
+                "Stud_id": num,
+                "Stud_name": f"Student{num}",
+                "Stud_marks": randint(0, 100)
+            }
+            data_entries.append(data_entry)
             payload = {"data": data_entries}
             tasks.append(make_request(session, url, payload))
         
