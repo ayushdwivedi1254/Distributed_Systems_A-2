@@ -100,22 +100,22 @@ We have optimized our code at almost every possible step. Some instances are as 
 
 ### A-1  
 
-Read time:  
-Write time:  
+Read time:  48.09 seconds
+Write time:  67.95 seconds
 
 ### A-2 
 
-Read time:  
-Read speed up:  
-Write time:  
-Write speed down:  
+Read time:  45.93 seconds
+Read speed up:  1.047
+Write time:  126.16 seconds
+Write speed down:  0.538
 
 ### A-3
 
-Read time:  
-Read speed up:  
-Write time:  
-Write speed up:  
+Read time:  47.39 seconds
+Read speed up:  1.014
+Write time:  172.87 seconds
+Write speed up:  0.393
 
 ### A-4  
 
