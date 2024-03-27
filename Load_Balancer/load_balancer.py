@@ -460,6 +460,33 @@ def heartbeat():
             # print("going to send payload")
             response = requests.post(
                 "http://load_balancer:5000/add", json=payload)
+            
+            shard_data={}
+            for serv in servers_dict.keys():
+                for shrd in servers_dict[serv]:
+                    if shrd not in shard_data:
+                        for copy_serv in MapT[shrd]:
+                            if copy_serv not in servers_dict:
+                                payload={
+                                    "shards":[shrd]
+                                }
+                                response=requests.get(f"http://{valid_server_name[copy_serv]}:5000/copy",json=payload)
+                                if response.status_code == 200:
+                                    response_json = response.json()
+                                    
+                                    sh_list = response_json.get(shrd, [])
+                                    shard_data[shrd]=sh_list
+                                    break
+
+            for serv in servers_dict.keys():
+                for shrd in servers_dict[serv]:
+                    if shrd in shard_data:
+                        payload={
+                            "shard": shrd,
+                            "curr_idx":0,
+                            "data":shard_data[shrd]
+                        }
+                        response=requests.post(f"http://{valid_server_name[serv]}:5000/write",json=payload)
         
         with server_name_lock:
             current_server_names = server_names.copy()
