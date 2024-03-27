@@ -7,7 +7,7 @@ import time
 async def make_request(session, url, payload):
     async with session.post(url, json=payload) as response:
         res = await response.text()
-        print(res)
+        # print(res)
         return res
 
 async def generate_requests():
