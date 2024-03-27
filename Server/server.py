@@ -190,6 +190,8 @@ def write():
         values = ', '.join(f'{value}' if isinstance(value,int) else f"'{value}'" for value in entry.values())
         insert_query=f'INSERT INTO {shard} ({columns}) VALUES ({values});'
         try:
+            while db_connection is None:
+                connect_to_database()
             cursor.execute(insert_query)
         except psycopg2.Error as e:
             if e.pgcode==errorcodes.UNIQUE_VIOLATION:
@@ -203,7 +205,7 @@ def write():
                 cursor.close()
                 db_connection.close()
                 db_connection=None
-                return jsonify(response_json),500
+                return jsonify(response_json),409
             else:
                 curr_idx=old_curr_idx
                 response_json = {
@@ -263,7 +265,7 @@ def update():
                 cursor.close()
                 db_connection.close()
                 db_connection=None
-                return jsonify(response_json),500
+                return jsonify(response_json),409
             else:
                 response_json = {
                     "message": f"Error when updating database",
@@ -288,7 +290,7 @@ def update():
             "message": f"No record found for Stud_id: {stud_id}",
             "status": "failure"
         }
-        return jsonify(response_json), 500
+        return jsonify(response_json), 404
 
 @app.route('/del', methods=['DELETE'])
 def delete():
@@ -324,7 +326,7 @@ def delete():
             "message": f"No record found for Stud_id: {stud_id}",
             "status": "failure"
         }
-        return jsonify(response_json), 500
+        return jsonify(response_json), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

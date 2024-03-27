@@ -167,15 +167,24 @@ def read_worker(thread_number):
 
 
 # Function to send write request to a server
-def send_write_request(server_name, payload, write_responses):
+def send_write_request(server_name, payload, write_responses, error_message, failed_entries):
     url = f'http://{valid_server_name[server_name]}:5000/write'
     try:
         response = requests.post(url, json=payload)
         #return response.json(), 200
-        write_responses.append(200)
+        response_payload = response.json()
+        if response.status_code != 200:
+            error_message.append(response_payload['message'])
+            if len(failed_entries) == 0:
+                failed_entries.extend(response_payload['failed_entries'])
+        write_responses.append(response.status_code)
+        # write_responses.append(200)
     except Exception as e:
         # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
         write_responses.append(500)
+        error_message.append(str(e))
+        if len(failed_entries) == 0:
+            failed_entries.extend(payload['data'])
 
 
 def write_worker(current_shard_id):
@@ -202,12 +211,14 @@ def write_worker(current_shard_id):
         }
 
         write_responses = []
+        error_message = []
+        failed_entries = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
             server_names_list = MapT[current_shard_id]
             threads = []
             for server_name in server_names_list:
-                thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses))
+                thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses, error_message, failed_entries))
                 thread.start()
                 threads.append(thread)
 
@@ -226,14 +237,16 @@ def write_worker(current_shard_id):
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
                     'message': "Writes successful",
-                    'responses': write_responses
+                    'responses': write_responses,
+                    'failed_entries': failed_entries
                 })
                 ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] = ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] + num_entries
             else:
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
-                    'message': "Writes failed",
-                    'responses': write_responses
+                    'message': error_message[0],
+                    'responses': write_responses,
+                    'failed_entries': failed_entries
                 })
 
         # Mark the task as done
@@ -241,15 +254,19 @@ def write_worker(current_shard_id):
 
 
 # Function to send update request to a server
-def send_update_request(server_name, payload, update_responses):
+def send_update_request(server_name, payload, update_responses, error_message):
     url = f'http://{valid_server_name[server_name]}:5000/update'
     try:
         response = requests.put(url, json=payload)
         #return response.json(), 200
-        update_responses.append(200)
+        response_payload = response.json()
+        if response.status_code != 200:
+            error_message.append(response_payload['message'])
+        update_responses.append(response.status_code)
     except Exception as e:
         # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
         update_responses.append(500)
+        error_message.append(str(e))
 
 def update_worker(current_shard_id):
     global MapT
@@ -267,12 +284,13 @@ def update_worker(current_shard_id):
         }
 
         update_responses = []
+        error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
             server_names_list = MapT[current_shard_id]
             threads = []
             for server_name in server_names_list:
-                thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses))
+                thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses, error_message))
                 thread.start()
                 threads.append(thread)
 
@@ -296,7 +314,7 @@ def update_worker(current_shard_id):
             else:
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
-                    'message': "Updates failed",
+                    'message': error_message[0],
                     'responses': update_responses
                 })
 
@@ -305,16 +323,20 @@ def update_worker(current_shard_id):
 
 
 # Function to send delete request to a server
-def send_delete_request(server_name, payload, delete_responses):
+def send_delete_request(server_name, payload, delete_responses, error_message):
     url = f'http://{valid_server_name[server_name]}:5000/del'
     try:
         response = requests.delete(url, json=payload)
         #return response.json(), 200
-        delete_responses.append(200)
+        response_payload = response.json()
+        if response.status_code != 200:
+            error_message.append(response_payload['message'])
+        delete_responses.append(response.status_code)
         # delete_responses.append(response.json())
     except Exception as e:
         # return {"error": str(e)}, 500  # Return error message and status code 500 for server error
         delete_responses.append(500)
+        error_message.append(str(e))
         # delete_responses.append(response.json())
 
 def delete_worker(current_shard_id):
@@ -332,12 +354,13 @@ def delete_worker(current_shard_id):
         }
 
         delete_responses = []
+        error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
             server_names_list = MapT[current_shard_id]
             threads = []
             for server_name in server_names_list:
-                thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses))
+                thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses, error_message))
                 thread.start()
                 threads.append(thread)
 
@@ -362,7 +385,7 @@ def delete_worker(current_shard_id):
             else:
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
-                    'message': "Updates failed",
+                    'message': error_message[0],
                     'responses': delete_responses
                 })
 
@@ -954,17 +977,26 @@ def write():
             'num_entries': len(shard_id_to_data_entries[shard_id])
         })
     
+    failed_entries = []
+    error_messages = []
+    failed_flag = False
+    
     # waiting for response of each request and appending the results to data
     for response_queue in response_queue_list:
         # Wait for the response from the read_worker thread
         response_data = response_queue.get()
         if response_data['status_code'] != 200:
-            response = {
-                "message": "Error while adding data entries",
-                "status": "failure"
-            }
-
-            return jsonify(response), response_data['status_code']
+            failed_flag = True
+            error_messages.append(response_data['message'])
+            failed_entries.extend(response_data['failed_entries'])
+    
+    if failed_flag == True:
+        response = {
+            "error messages": error_messages,
+            "failed entries": failed_entries,
+            "status": "failure"
+        }
+        return jsonify(response), 207
 
     response = {
         "message": f"{total_entries} Data entries added",
@@ -1016,7 +1048,7 @@ def update():
 
     if response_data['status_code'] != 200:
         response = {
-            "message": "Error while updating data entry",
+            "message": response_data['message'],
             "status": "failure"
         }
 
@@ -1071,7 +1103,7 @@ def delete():
 
     if response_data['status_code'] != 200:
         response = {
-            "message": "Error while deleting data entry",
+            "message": response_data['message'],
             "status": "failure"
             # "response": response_data['responses']
         }
@@ -1089,7 +1121,7 @@ def delete():
 
 # Catch-all endpoint
 @app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'])
 def catch_all(path):
     response = {
         'error': 'Path not found',
