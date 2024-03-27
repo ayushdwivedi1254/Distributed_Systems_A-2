@@ -1023,7 +1023,7 @@ def write():
             "failed entries": failed_entries,
             "status": "failure"
         }
-        return jsonify(response), 207
+        return jsonify(response), 200
 
     response = {
         "message": f"{total_entries} Data entries added",
