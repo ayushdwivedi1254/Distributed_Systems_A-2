@@ -1,9 +1,9 @@
-# Assignment 1: Implementing a Customizable Load Balancer
+# Assignment 2: Implementing a Scalable Database with Sharding
 
 ## Group Members:
-### Ayush Kumar Dwivedi (20CS10084)
-### Saptarshi De Chaudhury (20CS10080)
-### Nikumbh Sarthak Sham (20CS30035)
+### [Ayush Kumar Dwivedi](https://github.com/ayushdwivedi1254/) (20CS10084)
+### [Saptarshi De Chaudhury](https://github.com/saptarshidec) (20CS10080)
+### [Nikumbh Sarthak Sham](https://github.com/sarthak-nik) (20CS30035)
 
 ## Prerequisites
 Ensure that Docker and Docker Compose are installed on your machine before proceeding.
@@ -37,6 +37,7 @@ A class named ConsistentHashing has been defined which contains all the necessar
 `serverIndices`: Maintains the virtual server indexes of all the servers as a sorted set. It represents the circular structure of the consistent hash map.  
 `serverNameToIndex`: This is a dictionary object. For each server, it maintains a list of virtual server indexes that it is mapped to. 
 
+
 #### Working of Consistent Hashing
 
 Whenever a server is added to the network, its corresponding virtual server indexes are computed and stored in the respective data structures. Quadratic probing is used to ensure that two virtual server indexes do not coincide.  
@@ -49,17 +50,20 @@ When a server is removed from the network then the virtual server indexes are cl
 
 #### Global Data Structures used 
 
-`server_names`: This is a list of all the currently running servers.
+`server_names`: This is a list of all the currently running server names.
 `count`: Stores the number of currently running servers.
-`request_queue`: Queue for storing all incoming requests to servers.
+`read_request_queue`: Queue for storing all incoming read requests to servers. Similarly, there are queues for each shard for each of the write, update and delete reqeusts.
+`server_name_to_number`: Map from server name to its ID.
+`MapT`: Map from shard id to list of server names which maintain a replica of the shard.
+`ShardT`: Stores details of shards.
 
-Whenever the `/add` or `/rm` endpoints are called then `server_names` and `count` are updated by using locks appropriately. Queue is threadsafe in Python so there is no need to use locks when appending or popping from `request_queue`.
+Whenever the `/add` or `/rm` endpoints are called then `server_names` and `count` are updated by using locks appropriately. Queue is threadsafe in Python so there is no need to use locks when appending or popping from  the queues.
 
 #### Working of the Load Balancer
 
-##### Handling Requests to Server
+##### Read request
 
-The load balancer uses a queue to store all the incoming requests to the `/home` endpoint.  
+The load balancer uses a queue to store all the incoming read requests to the `/read` endpoint.
 
 We use multithreading to service the requests, namely we implement 100 worker threads, each of which does the following: 
 
@@ -71,44 +75,48 @@ The client that makes the request waits on the response field of the request obj
 
 We have used multithreading in the load balancer to ensure that the allocation of requests to servers and their handling can be done concurrently.
 
+##### Write, Update, Delete requests
+
+We have implemented a design such that there is a separate thread for each shard for write, update and delete requests.
+
+We find the shards corresponding to the requests and send them to their respective threads.
+
+Each thread puts a corresponding shard lock, sends the requests to all the servers containing this shard, and collects and sends the response from the servers.
+
 ##### Handling Failure of containers
 
 We define a heartbeat thread in the load balancer that periodically sends requests to the `/heartbeat` endpoint of all the servers in `server_names`.  
-The number of responding servers is counted and if it falls short of the minimum number of containers required then a corresponding call is made to the `/add` endpoint to spawn the remaining containers. The `server_names` and `count` variables are updated accordingly.
+We count the number of responding containers and store the shard information of the down servers if and only if they aren't stopped via `/rm`. The `server_names` and `count` variables are updated accordingly. We then call `/add` for all those servers. We use `/copy` and `/write` to populate the newly created shard replicas in the new server.
+
+### Code Optimizations
+
+We have optimized our code at almost every possible step. Some instances are as follows:
+
+   **1.** In `/read`, we have maintained the complexity to O(number of shards) while searching for shards containing range: low, high. It is the mininmum possible, instead of iterating through complete list of shards.
+   **2.** We have implemented binary search to find the shard which contains the student ID in O(log(N)), where N is the number of shards  
+   **3.** We have ensured parallelism at every stage, ensuring read requests are completely parallel, as well as providing separate threads for each shard for write, update and delete requests. Moreover, for write, update and delete requests, we again create separate threads for with a shard-thread while sending requests to different servers.
 
 ## Analysis  
 
 ### A-1  
 
-![A-1 bar chart](./images/Figure_A1.png)
-
-As we can see from the bar chart, when N=3, the vast majority of the requests are handled by Server 1. This is due to the hash function for virtual server mapping `Φ(i, j) = i² + j² + 2j + 25`.  
-
-Since i varies from 1 to 3 and j varies from 1 to 9, hence the first slot allocated to a virtual server corresponds to the index `1² + 1² + 2*1 + 25 = 29` (Server 1) and the last slot allocated to a virtual server corresponds to the index `3² + 9² + 2*9 + 25 = 133` (Server 3). As a result, all the requests that get mapped to indexes between 134 and 512 wrap around to the start of the circular hashmap and get allocated to Server 1.  
-
-This can affect the performance of the system since most of the requests are getting handled by Server 1 despite using the consistent hashing scheme. A better hash function can help to distribute the load.
+Read time: 
+Write time:
 
 ### A-2 
 
-![A-2 line chart](./images/Figure_A2.png)
-
-The line chart shows the average load of each server for each iteration from N=2 to N=6. Also the standard deviation of number of requests per server is calculated and plotted.
-
-We observe that the average load for each server decreases as the number of servers is increased. Also the standard deviation decreases, meaning that the load gets more evenly distributed with increase in number of servers. Hence the load balancer implementation is scalable with larger number of servers. Again, a better choice of hash function can improve the load distribution.
+Read time:
+Read speed up:
+Write time:
+Write speed down:
 
 ### A-3
 
-We have tested all the endpoints of the load balancer including the `/add` and `/rm` endpoints. The heartbeat thread of the load balancer keeps monitoring the server containers and whenever their number falls below N, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load.
+Read time:
+Read speed up:
+Write time:
+Write speed up:
 
 ### A-4  
 
-We have used the following hash functions:  
-
-Hash function for Request mapping: `H(i) = i² + 11i + 19`  
-Hash function for Server mapping: `Φ(i, j) = 16(i-1) + 57j`
-
-![A-1 newhash bar chart](./images/Figure_A1_newhash.png)  
-
-![A-2 newhash line chart](./images/Figure_A2_newhash.png)
-
-After running the tests for A-1 and A-2 using the new hash functions we get the above graphs. We can see that the load has been distributed much more evenly in this case and the standard deviation has also decreased significantly across all N from 2 to 6.
+We have tested all the endpoints of the load balancer including the `/add` and `/rm` endpoints. The heartbeat thread of the load balancer keeps monitoring the server containers and whenever a server is manually dropped, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load, copying the shard entries from the other replicas at the same time.
