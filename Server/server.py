@@ -117,6 +117,8 @@ def copy():
     response_data = {}
 
     for shard in shards:
+        while db_connection is None:
+            connect_to_database()
         cursor = db_connection.cursor()
         cursor.execute(f"SELECT * FROM {shard};")
         data = cursor.fetchall()
@@ -151,6 +153,8 @@ def read():
 
     response_data = []
 
+    while db_connection is None:
+        connect_to_database()
     cursor = db_connection.cursor()
     cursor.execute(f'SELECT * FROM {shard} WHERE "Stud_id" BETWEEN {low} AND {high};')
     data = cursor.fetchall()
@@ -192,6 +196,7 @@ def write():
         try:
             while db_connection is None:
                 connect_to_database()
+            cursor = db_connection.cursor()
             cursor.execute(insert_query)
         except psycopg2.Error as e:
             if e.pgcode==errorcodes.UNIQUE_VIOLATION:
@@ -248,6 +253,9 @@ def update():
     cursor = db_connection.cursor()
 
     check_query = f'SELECT * FROM {shard} WHERE "Stud_id" = %s;'
+    while db_connection is None:
+        connect_to_database()
+    cursor = db_connection.cursor()
     cursor.execute(check_query, (stud_id,))
     existing_record = cursor.fetchone()  # Fetch one record
     
@@ -255,6 +263,9 @@ def update():
         set_clause=', '.join([f'"{column}"=%s' for column in columns])
         update_query=f'UPDATE {shard} SET {set_clause} WHERE "Stud_id"={stud_id};'
         try:
+            while db_connection is None:
+                connect_to_database()
+            cursor = db_connection.cursor()
             cursor.execute(update_query,values)
         except psycopg2.Error as e:
             if e.pgcode==errorcodes.UNIQUE_VIOLATION:
@@ -305,11 +316,17 @@ def delete():
     cursor = db_connection.cursor()
     
     check_query = f'SELECT * FROM {shard} WHERE "Stud_id" = %s;'
+    while db_connection is None:
+        connect_to_database()
+    cursor = db_connection.cursor()
     cursor.execute(check_query, (stud_id,))
     existing_record = cursor.fetchone()  # Fetch one record
 
     if existing_record:
         delete_query=f'DELETE FROM {shard} WHERE "Stud_id"={stud_id};'
+        while db_connection is None:
+            connect_to_database()
+        cursor = db_connection.cursor()
         cursor.execute(delete_query)
         db_connection.commit()
     
